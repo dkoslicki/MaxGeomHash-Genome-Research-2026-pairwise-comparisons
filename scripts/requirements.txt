@@ -1,0 +1,3 @@
+sourmash
+sourmash-plugin-betterplot
+sourmash_plugin_branchwater
