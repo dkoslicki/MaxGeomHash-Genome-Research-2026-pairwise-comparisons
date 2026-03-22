@@ -20,7 +20,9 @@ GTDB_DIR="${BASE_DIR}/data/GTDB"
 SKETCH_DIR="${GTDB_DIR}/alphamaxgeom_sketches"
 CANDIDATES="${GTDB_DIR}/gtdb_pairwise_containment.csv"
 OUTPUT_DIR="${GTDB_DIR}/alphamaxgeom_pairwise"
-CORES=192
+
+CONFIG="${BASE_DIR}/config.json"
+CORES=$(python3 -c "import json; print(json.load(open('${CONFIG}'))['pairwise_cores'])")
 
 echo "Starting AlphaMaxGeomHash pairwise computation ..."
 echo "  Sketch dir  : ${SKETCH_DIR}"

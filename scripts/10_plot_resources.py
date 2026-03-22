@@ -502,68 +502,47 @@ def plot_disk(stats, out_dir, method_order=None):
 
     fig, ax = plt.subplots(figsize=(max(6.5, n * 1.5), 4.5))
 
-    kmc_pw_bytes = stats.get("KMC (exact)", {}).get("pairwise_bytes") or 1.0
+    kmc_idx_bytes = stats.get("KMC (exact)", {}).get("index_bytes") or 1.0
 
     for i, method in enumerate(methods):
         s      = stats[method]
         col    = METHOD_COLORS.get(method, {"index": "#888", "pairwise": "#BBB"})
         idx_b  = s["index_bytes"]
-        pw_b   = s["pairwise_bytes"]
         idx_gb = idx_b / 1e9
-        pw_gb  = pw_b  / 1e9
 
         ax.bar(i, idx_gb, width, bottom=floor,
-               color=col["index"],    edgecolor="white", linewidth=0.5)
-        ax.bar(i, pw_gb,  width, bottom=floor + idx_gb,
-               color=col["pairwise"], edgecolor="white", linewidth=0.5)
+               color=col["index"], edgecolor="white", linewidth=0.5)
 
-        bar_top = floor + idx_gb + pw_gb
+        bar_top = floor + idx_gb
 
-        if idx_gb > 0 and (floor + idx_gb) / floor > 2.0:
-            cy = _log_center(floor, floor + idx_gb)
+        if idx_gb > 0 and bar_top / floor > 2.0:
+            cy = _log_center(floor, bar_top)
             ax.text(i, cy, _fmt_bytes(idx_b),
                     ha="center", va="center", fontsize=7,
                     color="white", fontweight="bold")
-        if pw_gb > 0 and bar_top / (floor + idx_gb) > 2.0:
-            cy = _log_center(floor + idx_gb, bar_top)
-            ax.text(i, cy, _fmt_bytes(pw_b),
-                    ha="center", va="center", fontsize=7,
-                    color="white", fontweight="bold")
-
-        if idx_gb > 0 and (floor + idx_gb) / floor <= 2.0:
-            ax.text(i, floor + idx_gb * 1.05,
-                    f"idx: {_fmt_bytes(idx_b)}",
-                    ha="center", va="bottom", fontsize=6.5, color="#333")
-        if pw_gb > 0 and bar_top / (floor + idx_gb) <= 2.0:
-            ax.text(i, bar_top * 1.05,
-                    f"pw: {_fmt_bytes(pw_b)}",
+        else:
+            ax.text(i, bar_top * 1.05, _fmt_bytes(idx_b),
                     ha="center", va="bottom", fontsize=6.5, color="#333")
 
-        total_b = idx_b + pw_b
-        ratio   = total_b / kmc_pw_bytes
+        ratio = idx_b / kmc_idx_bytes
         ax.text(i, bar_top * 1.6,
-                f"x{ratio:.0f}",
+                f"x{ratio:.2f}",
                 ha="center", va="bottom", fontsize=9, fontweight="bold")
 
     ax.set_yscale("log")
     ax.set_xticks(x)
     ax.set_xticklabels(methods, fontsize=8, rotation=15, ha="right")
-    ax.set_ylabel("Disk space (GB, log scale)", fontsize=9)
+    ax.set_ylabel("Sketch / index size on disk (GB, log scale)", fontsize=9)
     all_tops = [
-        _DISK_FLOOR_GB + s["index_bytes"] / 1e9 + s["pairwise_bytes"] / 1e9
+        _DISK_FLOOR_GB + s["index_bytes"] / 1e9
         for s in stats.values()
     ]
     ax.set_ylim(_DISK_FLOOR_GB / 2, max(all_tops) * 5)
     ax.yaxis.grid(True, which="both", linestyle="--", linewidth=0.4, alpha=0.6)
     ax.set_axisbelow(True)
 
-    legend_handles = [
-        mpatches.Patch(color="#555555", label="Index / sketch storage"),
-        mpatches.Patch(color="#AAAAAA", label="Pairwise results storage"),
-    ]
-    ax.legend(handles=legend_handles, fontsize=8, loc="upper left")
     ax.annotate(
-        f"xN = total storage relative to KMC pairwise output ({_fmt_bytes(kmc_pw_bytes)})",
+        f"xN = sketch size relative to KMC index ({_fmt_bytes(kmc_idx_bytes)})",
         xy=(0.01, 0.01), xycoords="axes fraction",
         fontsize=7, va="bottom", color="#444",
     )

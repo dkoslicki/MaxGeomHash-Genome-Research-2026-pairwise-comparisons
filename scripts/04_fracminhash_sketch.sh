@@ -42,17 +42,19 @@ SKETCH_DIR="${GTDB_DIR}/fracminhash_sketches"
 SKETCH_BIN="${BASE_DIR}/scripts/kmer-sketch/bin/sketch"
 
 # ---------------------------------------------------------------------------
-# FracMinHash parameters — made explicit even where they equal defaults
+# Parameters — read from config.json at project root
 # ---------------------------------------------------------------------------
-ALGO="fracminhash"
-KMER=31
-SCALE=0.001     # scale = 1/scaled; 0.001 matches sourmash scaled=1000
-SEED=42
+CONFIG="${BASE_DIR}/config.json"
+if [[ ! -f "${CONFIG}" ]]; then
+    echo "ERROR: config.json not found at ${CONFIG}" >&2; exit 1
+fi
+cfg() { python3 -c "import json; print(json.load(open('${CONFIG}'))$1)"; }
 
-# ---------------------------------------------------------------------------
-# Parallelism — one core per job (sketching is CPU-bound, low memory usage)
-# ---------------------------------------------------------------------------
-PARALLEL_JOBS=192
+ALGO="fracminhash"
+KMER=$(cfg "['kmer']")
+SEED=$(cfg "['seed']")
+SCALE=$(cfg "['fracminhash']['scale']")
+PARALLEL_JOBS=$(cfg "['parallel_jobs']")
 
 # ---------------------------------------------------------------------------
 # Test mode: set TEST_N to a positive integer to process only the first N
@@ -110,24 +112,12 @@ N_TOTAL=$(wc -l < "${GENOME_LIST}")
 echo "Found ${N_TOTAL} genome files to process."
 
 # ---------------------------------------------------------------------------
-# Skip genomes whose sketch already exists (resumable)
+# Always re-sketch all genomes — no skip logic.
+# Skipping existing files would undercount timing on repeat runs.
 # ---------------------------------------------------------------------------
-while IFS= read -r genome_path; do
-    genome_name=$(basename "${genome_path}" \
-        | sed 's/\.\(fna\|fa\|fasta\)\.gz$//; s/\.gz$//')
-    out_sketch="${SKETCH_DIR}/${genome_name}.fracminhash.sketch"
-    if [[ ! -f "${out_sketch}" ]]; then
-        echo "${genome_path}"
-    fi
-done < "${GENOME_LIST}" > "${GENOME_LIST_TODO}"
-
-N_TODO=$(wc -l < "${GENOME_LIST_TODO}")
-echo "${N_TODO} genomes need sketching ($(( N_TOTAL - N_TODO )) already done)."
-
-if [[ "${N_TODO}" -eq 0 ]]; then
-    echo "All genomes already sketched — nothing to do."
-    exit 0
-fi
+cp "${GENOME_LIST}" "${GENOME_LIST_TODO}"
+N_TODO=${N_TOTAL}
+echo "Sketching all ${N_TODO} genomes (existing sketches will be overwritten)."
 
 # ---------------------------------------------------------------------------
 # Worker function: decompress one genome and sketch it
