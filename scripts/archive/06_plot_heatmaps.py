@@ -243,8 +243,10 @@ def build_submatrix(sorted_keys: np.ndarray, metric_array: np.ndarray,
     hi = np.maximum(g1, g2)
     pair_keys = lo * N + hi
 
-    pos   = np.searchsorted(sorted_keys, pair_keys)
-    found = (pos < len(sorted_keys)) & (sorted_keys[pos] == pair_keys)
+    pos      = np.searchsorted(sorted_keys, pair_keys)
+    in_range = pos < len(sorted_keys)
+    pos_safe = np.where(in_range, pos, 0)
+    found    = in_range & (sorted_keys[pos_safe] == pair_keys)
 
     mat[ii[found], jj[found]] = metric_array[pos[found]]
     mat[jj[found], ii[found]] = metric_array[pos[found]]

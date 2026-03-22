@@ -237,27 +237,23 @@ data/GTDB/
 
 ---
 
-## Notes on script numbering
+## Notes on script numbering and archive
 
-Scripts `03_alphamaxgeom_sketch.sh`, `04_alphamaxgeom_pairwise.*`,
-`05_sanity_check.py`, and `06_plot_*.py/sh` are the **original scripts** that
-were used to run the AlphaMaxGeomHash full-run results on 2026-03-21.
-They are kept unchanged for reproducibility.
+The pipeline was extended after the initial AMG-only run to also support
+MinHash and FracMinHash (kmer-sketch).  The original scripts were renumbered
+to make room, and the superseded originals were moved to `scripts/archive/`
+(still tracked by git for full reproducibility):
 
-The pipeline was later extended to support MinHash and FracMinHash
-(kmer-sketch), which required inserting new scripts at positions 03–07.
-The original AMG scripts were therefore renumbered:
+| Archived script | Superseded by | Key difference |
+|-----------------|---------------|----------------|
+| `archive/03_alphamaxgeom_sketch.sh` | `05_alphamaxgeom_sketch.sh` | Same logic; new number |
+| `archive/04_alphamaxgeom_pairwise.*` | `08_alphamaxgeom_pairwise.*` | Same logic; new number |
+| `archive/05_sanity_check.py` | `09_sanity_check.py` | AMG+Sourmash only → multi-method |
+| `archive/06_plot_heatmaps.py` | `10_plot_heatmaps.py` | AMG+Sourmash hardcoded → any kmer-sketch method; Sourmash optional |
+| `archive/06_plot_resources.py` | `10_plot_resources.py` | KMC+Sourmash+AMG hardcoded → all four methods; Sourmash optional |
+| `archive/06_run_plots.sh` | `10_run_plots.sh` | Calls archived scripts → calls current scripts |
 
-| Original | New name | Role |
-|----------|----------|------|
-| `03_alphamaxgeom_sketch.sh` | `05_alphamaxgeom_sketch.sh` | AMG sketching |
-| `04_alphamaxgeom_pairwise.*` | `08_alphamaxgeom_pairwise.*` | AMG pairwise |
-| `05_sanity_check.py` | `09_sanity_check.py` | Multi-method sanity check |
-| `06_plot_heatmaps.py` | `10_plot_heatmaps.py` | Multi-method heatmaps |
-| `06_plot_resources.py` | `10_plot_resources.py` | Multi-method resources |
-| `06_run_plots.sh` | `10_run_plots.sh` | Wrapper |
-
-Use the **new numbered scripts** (03–10) for all current and future work.
+Use the **active scripts** (03–10 in `scripts/`) for all current and future work.
 
 ---
 
