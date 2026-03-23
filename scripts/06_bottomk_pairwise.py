@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-06_minhash_pairwise.py
+06_bottomk_pairwise.py
 =======================
 Compute pairwise Jaccard similarity and containment for candidate GTDB genome
-pairs using MinHash sketches (kmer-sketch binary, --algo minhash).
+pairs using BottomK sketches (kmer-sketch binary, --algo bottomk).
 
 Only genome pairs that passed the FracMinHash 0.01 max-containment threshold
 (listed in --candidates CSV) are evaluated.  Both genomes in a pair must have
@@ -39,11 +39,11 @@ Outputs (in --output directory):
   pairwise_run_stats.json — timing, counts, disk usage for later comparison
 
 Usage:
-  # Test run (after TEST_N=200 bash 03_minhash_sketch.sh):
-  python3 06_minhash_pairwise.py \\
-      --sketch-dir /scratch/.../minhash_sketches \\
+  # Test run (after TEST_N=200 bash 03_bottomk_sketch.sh):
+  python3 06_bottomk_pairwise.py \\
+      --sketch-dir /scratch/.../bottomk_sketches \\
       --candidates /scratch/.../gtdb_pairwise_containment.csv \\
-      --output     /scratch/.../minhash_pairwise \\
+      --output     /scratch/.../bottomk_pairwise \\
       --cores      192
 
   # Full run — identical command; the script automatically uses all available
@@ -79,7 +79,7 @@ log = logging.getLogger(__name__)
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _FILTER_BIN  = _SCRIPT_DIR / "kmer-sketch" / "bin" / "filter"
 
-_SKETCH_EXT = ".minhash.sketch"
+_SKETCH_EXT = ".bottomk.sketch"
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +156,7 @@ def _run_filter_for_query(args: tuple):
         return None
 
     # Unique temp directory per call
-    worker_tmp = tempfile.mkdtemp(prefix=f"mh_{query_id[:12]}_", dir=tmp_root)
+    worker_tmp = tempfile.mkdtemp(prefix=f"bk_{query_id[:12]}_", dir=tmp_root)
     try:
         refs_file = os.path.join(worker_tmp, "refs.txt")
         with open(refs_file, "w") as f:
@@ -223,12 +223,12 @@ def _run_filter_for_query(args: tuple):
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="MinHash pairwise similarity for GTDB candidate pairs.",
+        description="BottomK pairwise similarity for GTDB candidate pairs.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--sketch-dir", required=True,
-                   help="Directory of *.minhash.sketch files "
-                        "(from 03_minhash_sketch.sh)")
+                   help="Directory of *.bottomk.sketch files "
+                        "(from 03_bottomk_sketch.sh)")
     p.add_argument("--candidates", required=True,
                    help="FracMinHash pairwise CSV with query_name/match_name columns "
                         "(gtdb_pairwise_containment.csv)")
@@ -265,7 +265,7 @@ def main():
 
     if not pairs:
         log.error(
-            "No pairs to process. Run 03_minhash_sketch.sh first "
+            "No pairs to process. Run 03_bottomk_sketch.sh first "
             "(with TEST_N set if testing)."
         )
         sys.exit(1)
@@ -290,7 +290,7 @@ def main():
     log.info("Genome index written to %s  (%d entries)", index_path, n_genomes)
 
     # ---- Shared temp directory ------------------------------------------------
-    tmp_root = tempfile.mkdtemp(prefix="mh_pairwise_tmp_", dir=str(out_dir))
+    tmp_root = tempfile.mkdtemp(prefix="bk_pairwise_tmp_", dir=str(out_dir))
 
     # ---- Build task list ------------------------------------------------------
     tasks = [
@@ -393,8 +393,8 @@ def main():
     )
 
     stats = {
-        "script":                   "06_minhash_pairwise.py",
-        "algo":                     "minhash",
+        "script":                   "06_bottomk_pairwise.py",
+        "algo":                     "bottomk",
         "sketch_dir":               args.sketch_dir,
         "candidates_csv":           args.candidates,
         "n_sketches_available":     len(available),
@@ -432,7 +432,7 @@ def main():
     print()
     print("Next step (sanity check):")
     print(f"  python3 {_SCRIPT_DIR}/09_sanity_check.py \\")
-    print(f"      --minhash-pairwise   {out_dir} \\")
+    print(f"      --bottomk-pairwise   {out_dir} \\")
     print(f"      --kmc-pairwise       <kmc_pairwise_dir> \\")
     print(f"      --output             {out_dir}/sanity_check")
 

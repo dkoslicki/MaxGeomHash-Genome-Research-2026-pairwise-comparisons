@@ -7,7 +7,7 @@ sketching methods against the KMC exact k-mer ground truth.
 
 Supported methods (all optional; include whichever have been run):
   AlphaMaxGeomHash    --amg-pairwise          (NPZ directory)
-  MinHash             --minhash-pairwise       (NPZ directory)
+  BottomK             --bottomk-pairwise       (NPZ directory)
   FracMinHash         --fracminhash-pairwise   (NPZ directory; kmer-sketch binary)
   Sourmash FracMinHash --sourmash-csv          (CSV file; off by default, use
                                                 --include-sourmash to enable)
@@ -38,7 +38,7 @@ Usage:
     # All three kmer-sketch methods (most common):
     python3 10_plot_heatmaps.py \\
         --amg-pairwise         data/GTDB/alphamaxgeom_pairwise \\
-        --minhash-pairwise     data/GTDB/minhash_pairwise \\
+        --bottomk-pairwise     data/GTDB/bottomk_pairwise \\
         --fracminhash-pairwise data/GTDB/fracminhash_pairwise \\
         --kmc-pairwise         data/GTDB/kmc_pairwise \\
         --output               data/GTDB/figures \\
@@ -514,8 +514,8 @@ def parse_args():
     p.add_argument("--amg-pairwise", default="",
                    help="AlphaMaxGeomHash pairwise directory "
                         "(pairwise_results.npz + genome_index.json)")
-    p.add_argument("--minhash-pairwise", default="",
-                   help="MinHash (kmer-sketch) pairwise directory "
+    p.add_argument("--bottomk-pairwise", default="",
+                   help="BottomK (kmer-sketch) pairwise directory "
                         "(pairwise_results.npz + genome_index.json)")
     p.add_argument("--fracminhash-pairwise", default="",
                    help="FracMinHash (kmer-sketch) pairwise directory "
@@ -589,7 +589,7 @@ def main():
         )
 
     amg  = _load_npz_dir(args.amg_pairwise,          "AlphaMaxGeomHash")
-    mh   = _load_npz_dir(args.minhash_pairwise,       "MinHash")
+    bk   = _load_npz_dir(args.bottomk_pairwise,       "BottomK")
     fmh_ks = _load_npz_dir(args.fracminhash_pairwise, "FracMinHash (kmer-sketch)")
 
     # Sourmash FracMinHash CSV (optional; excluded by default)
@@ -624,7 +624,7 @@ def main():
     # ------------------------------------------------------------------
     method_specs = [
         (amg,    "AlphaMaxGeomHash\n(W=64, α=0.45, k=31)"),
-        (mh,     "MinHash\n(num-perm=1000, k=31)"),
+        (bk,     "BottomK\n(k=1000, kmer=31)"),
         (fmh_ks, "FracMinHash\n(kmer-sketch, scale=0.001, k=31)"),
         (fmh_ss, "Sourmash FracMinHash\n(scaled=1000, k=31)"),
     ]
@@ -645,7 +645,7 @@ def main():
 
     if not methods:
         log.error("No method data loaded — provide at least one of "
-                  "--amg-pairwise, --minhash-pairwise, --fracminhash-pairwise.")
+                  "--amg-pairwise, --bottomk-pairwise, --fracminhash-pairwise.")
         sys.exit(1)
 
     # ------------------------------------------------------------------

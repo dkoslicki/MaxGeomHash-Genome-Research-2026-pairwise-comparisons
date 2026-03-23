@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# 03_minhash_sketch.sh
+# 03_bottomk_sketch.sh
 #
-# Create MinHash sketches of all GTDB representative genomes using the
+# Create BottomK sketches of all GTDB representative genomes using the
 # kmer-sketch binary.
 #
-# Algorithm:  minhash  (--num-perm 1000)
+# Algorithm:  bottomk  (--k 1000)
 # K-mer size: 31, canonical k-mers, seed=42
 #
 # Genomes are stored compressed (.fna.gz).  Each genome is decompressed to
@@ -13,18 +13,18 @@
 # Compressed originals are never modified.
 #
 # Outputs:
-#   data/GTDB/minhash_sketches/{genome_id}.minhash.sketch  (one per genome)
-#   data/GTDB/minhash_sketches/sketch_run_stats.json       (timing + disk usage)
+#   data/GTDB/bottomk_sketches/{genome_id}.bottomk.sketch  (one per genome)
+#   data/GTDB/bottomk_sketches/sketch_run_stats.json       (timing + disk usage)
 #
 # Prerequisites:
 #   GNU parallel  (apt: parallel)
 #   sketch binary compiled in scripts/kmer-sketch/bin/
 #
 # Test mode — sketch only the first N genomes:
-#   TEST_N=200 bash 03_minhash_sketch.sh
+#   TEST_N=200 bash 03_bottomk_sketch.sh
 #
 # Full run — sketch all genomes (unset or 0 means "all"):
-#   bash 03_minhash_sketch.sh
+#   bash 03_bottomk_sketch.sh
 # ==============================================================================
 set -euo pipefail
 
@@ -34,7 +34,7 @@ set -euo pipefail
 BASE_DIR="/scratch/shared_data/MaxGeomHash_Genome_Research_2026"
 GTDB_DIR="${BASE_DIR}/data/GTDB"
 MANIFEST="${GTDB_DIR}/manysketch.csv"           # name,genome_filename,protein_filename
-SKETCH_DIR="${GTDB_DIR}/minhash_sketches"
+SKETCH_DIR="${GTDB_DIR}/bottomk_sketches"
 SKETCH_BIN="${BASE_DIR}/scripts/kmer-sketch/bin/sketch"
 
 # ---------------------------------------------------------------------------
@@ -46,16 +46,16 @@ if [[ ! -f "${CONFIG}" ]]; then
 fi
 cfg() { python3 -c "import json; print(json.load(open('${CONFIG}'))$1)"; }
 
-ALGO="minhash"
+ALGO="bottomk"
 KMER=$(cfg "['kmer']")
 SEED=$(cfg "['seed']")
-NUM_PERM=$(cfg "['minhash']['num_perm']")
+K=$(cfg "['bottomk']['k']")
 PARALLEL_JOBS=$(cfg "['parallel_jobs']")
 
 # ---------------------------------------------------------------------------
 # Test mode: set TEST_N to a positive integer to process only the first N
 # genomes from the manifest.  Leave at 0 (default) to process all genomes.
-# Override at the command line: TEST_N=500 bash 03_minhash_sketch.sh
+# Override at the command line: TEST_N=500 bash 03_bottomk_sketch.sh
 # ---------------------------------------------------------------------------
 TEST_N="${TEST_N:-0}"
 
@@ -119,14 +119,14 @@ echo "Sketching all ${N_TODO} genomes (existing sketches will be overwritten)."
 # Worker function: decompress one genome and sketch it
 # Exported so GNU parallel can call it in a subshell
 # ---------------------------------------------------------------------------
-export SKETCH_DIR SKETCH_BIN ALGO KMER NUM_PERM SEED
+export SKETCH_DIR SKETCH_BIN ALGO KMER K SEED
 
 sketch_genome() {
     local genome_path="$1"
     local genome_name
     genome_name=$(basename "${genome_path}" \
         | sed 's/\.\(fna\|fa\|fasta\)\.gz$//; s/\.gz$//')
-    local out_sketch="${SKETCH_DIR}/${genome_name}.minhash.sketch"
+    local out_sketch="${SKETCH_DIR}/${genome_name}.bottomk.sketch"
 
     # Per-job temp file: unique name avoids conflicts among parallel workers
     local tmp_fasta
@@ -139,12 +139,12 @@ sketch_genome() {
         return 1
     fi
 
-    # Create the MinHash sketch
+    # Create the BottomK sketch
     if ! "${SKETCH_BIN}" \
             --input    "${tmp_fasta}" \
             --kmer     "${KMER}" \
             --algo     "${ALGO}" \
-            --num-perm "${NUM_PERM}" \
+            --k        "${K}" \
             --seed     "${SEED}" \
             --canonical \
             --output   "${out_sketch}" 2>/dev/null; then
@@ -162,7 +162,7 @@ export -f sketch_genome
 # ---------------------------------------------------------------------------
 echo ""
 echo "Sketching ${N_TODO} genomes with ${PARALLEL_JOBS} parallel jobs ..."
-echo "  algo=${ALGO}, k=${KMER}, num-perm=${NUM_PERM}, seed=${SEED}"
+echo "  algo=${ALGO}, kmer=${KMER}, k=${K}, seed=${SEED}"
 echo ""
 
 /usr/bin/time -v \
@@ -182,7 +182,7 @@ hours=$(( elapsed / 3600 ))
 minutes=$(( (elapsed % 3600) / 60 ))
 seconds=$(( elapsed % 60 ))
 
-N_SKETCHED=$(find "${SKETCH_DIR}" -maxdepth 1 -name "*.minhash.sketch" | wc -l)
+N_SKETCHED=$(find "${SKETCH_DIR}" -maxdepth 1 -name "*.bottomk.sketch" | wc -l)
 sketch_dir_size=$(du -sh "${SKETCH_DIR}" 2>/dev/null | cut -f1 || echo "unavailable")
 
 peak_ram_kb=$(grep -m1 "Maximum resident set size" "${TIME_LOG}" \
@@ -202,10 +202,10 @@ STATS_FILE="${SKETCH_DIR}/sketch_run_stats.json"
 python3 - <<PYEOF
 import json
 stats = {
-    "script":                "03_minhash_sketch.sh",
+    "script":                "03_bottomk_sketch.sh",
     "algo":                  "${ALGO}",
     "kmer":                  ${KMER},
-    "num_perm":              ${NUM_PERM},
+    "k":                     ${K},
     "seed":                  ${SEED},
     "canonical":             True,
     "parallel_jobs":         ${PARALLEL_JOBS},
@@ -229,16 +229,16 @@ printf "  Wall-clock time   : %02d:%02d:%02d (hh:mm:ss)\n" "${hours}" "${minutes
 printf "  Peak RAM usage    : %s\n"  "${peak_ram_human}"
 printf "  Genomes sketched  : %d total (%d new this run)\n" "${N_SKETCHED}" "${N_TODO}"
 printf "  Sketch directory  : %s  (%s)\n" "${SKETCH_DIR}" "${sketch_dir_size}"
-printf "  Parameters        : algo=%s  k=%d  num-perm=%d  seed=%d\n" \
-       "${ALGO}" "${KMER}" "${NUM_PERM}" "${SEED}"
+printf "  Parameters        : algo=%s  kmer=%d  k=%d  seed=%d\n" \
+       "${ALGO}" "${KMER}" "${K}" "${SEED}"
 echo "========================================================================="
 echo ""
 echo "Next step:"
-echo "  python3 ${BASE_DIR}/scripts/06_minhash_pairwise.py \\"
+echo "  python3 ${BASE_DIR}/scripts/06_bottomk_pairwise.py \\"
 echo "      --sketch-dir ${SKETCH_DIR} \\"
 echo "      --candidates ${GTDB_DIR}/gtdb_pairwise_containment.csv \\"
-echo "      --output     ${GTDB_DIR}/minhash_pairwise \\"
+echo "      --output     ${GTDB_DIR}/bottomk_pairwise \\"
 echo "      --cores      192"
 echo ""
 echo "Or run the wrapper:"
-echo "  bash ${BASE_DIR}/scripts/06_minhash_pairwise.sh"
+echo "  bash ${BASE_DIR}/scripts/06_bottomk_pairwise.sh"

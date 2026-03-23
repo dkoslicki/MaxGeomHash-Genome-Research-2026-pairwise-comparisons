@@ -6,7 +6,7 @@ Generate publication-quality time and disk-space comparison figures for the
 genome-similarity pipelines evaluated in this study:
 
     KMC (exact)               -- k-mer counting + exact pairwise comparison
-    MinHash                   -- 03_minhash_sketch.sh + 06_minhash_pairwise.py
+    BottomK                   -- 03_bottomk_sketch.sh + 06_bottomk_pairwise.py
     FracMinHash (kmer-sketch) -- 04_fracminhash_sketch.sh + 07_fracminhash_pairwise.py
     AlphaMaxGeomHash          -- 05_alphamaxgeom_sketch.sh + 08_alphamaxgeom_pairwise.py
     Sourmash FracMinHash      -- make_sourmash_sketches.sh + compute_sourmash_pairwise.sh
@@ -29,8 +29,8 @@ Timing sources
 --------------
   AMG sketch    : data/GTDB/alphamaxgeom_sketches/sketch_run_stats.json
   AMG pairwise  : data/GTDB/alphamaxgeom_pairwise/pairwise_run_stats.json
-  MH sketch     : data/GTDB/minhash_sketches/sketch_run_stats.json
-  MH pairwise   : data/GTDB/minhash_pairwise/pairwise_run_stats.json
+  BK sketch     : data/GTDB/bottomk_sketches/sketch_run_stats.json
+  BK pairwise   : data/GTDB/bottomk_pairwise/pairwise_run_stats.json
   FMH_ks sketch : data/GTDB/fracminhash_sketches/sketch_run_stats.json
   FMH_ks pairwise: data/GTDB/fracminhash_pairwise/pairwise_run_stats.json
   Sourmash sketch  : scripts/make_sourmash_sketches.log   (GNU time block)
@@ -91,7 +91,7 @@ plt.rcParams.update({
 # ---------------------------------------------------------------------------
 METHOD_COLORS = {
     "KMC (exact)":              {"index": "#2166AC", "pairwise": "#92C5DE"},  # blues
-    "MinHash":                  {"index": "#762A83", "pairwise": "#C2A5CF"},  # purples
+    "BottomK":                  {"index": "#762A83", "pairwise": "#C2A5CF"},  # purples
     "FracMinHash (kmer-sketch)":{"index": "#D6604D", "pairwise": "#F4A582"},  # reds
     "AlphaMaxGeomHash":         {"index": "#4DAC26", "pairwise": "#B8E186"},  # greens
     # Sourmash FracMinHash (off by default; add via --include-sourmash):
@@ -246,31 +246,31 @@ def collect_stats(base, include_sourmash=False):
     }
 
     # ------------------------------------------------------------------
-    # MinHash
+    # BottomK
     # ------------------------------------------------------------------
-    mh_sketch_json   = data / "minhash_sketches"  / "sketch_run_stats.json"
-    mh_pairwise_json = data / "minhash_pairwise"  / "pairwise_run_stats.json"
+    bk_sketch_json   = data / "bottomk_sketches"  / "sketch_run_stats.json"
+    bk_pairwise_json = data / "bottomk_pairwise"  / "pairwise_run_stats.json"
 
-    mh_index_s    = _json_stat(mh_sketch_json,   "wall_clock_seconds")
-    mh_pairwise_s = _json_stat(mh_pairwise_json, "wall_clock_seconds")
+    bk_index_s    = _json_stat(bk_sketch_json,   "wall_clock_seconds")
+    bk_pairwise_s = _json_stat(bk_pairwise_json, "wall_clock_seconds")
 
-    stats["MinHash"] = {
-        "index_seconds":    mh_index_s,
-        "pairwise_seconds": mh_pairwise_s,
-        "index_bytes":      disk_bytes(data / "minhash_sketches"),
-        "pairwise_bytes":   disk_bytes(data / "minhash_pairwise"),
+    stats["BottomK"] = {
+        "index_seconds":    bk_index_s,
+        "pairwise_seconds": bk_pairwise_s,
+        "index_bytes":      disk_bytes(data / "bottomk_sketches"),
+        "pairwise_bytes":   disk_bytes(data / "bottomk_pairwise"),
         "index_ram_kb":     None,
         "pairwise_ram_kb":  None,
     }
-    if mh_sketch_json.exists():
-        with open(mh_sketch_json) as f:
+    if bk_sketch_json.exists():
+        with open(bk_sketch_json) as f:
             jd = json.load(f)
         ram_str = jd.get("peak_ram", "")
         m = re.match(r"([\d.]+)\s*(\w+)", ram_str)
         if m:
             val, unit = float(m.group(1)), m.group(2).upper()
             mult = {"KB": 1, "MB": 1024, "GB": 1024**2}.get(unit, 1)
-            stats["MinHash"]["index_ram_kb"] = val * mult
+            stats["BottomK"]["index_ram_kb"] = val * mult
 
     # ------------------------------------------------------------------
     # FracMinHash (kmer-sketch binary)
@@ -584,7 +584,7 @@ def plot_tradeoff(stats, sanity_json, out_dir, method_order=None):
     # 09_sanity_check.py writes labels like "AlphaMaxGeomHash vs KMC -- Jaccard"
     label_map = {
         "AlphaMaxGeomHash":          "AlphaMaxGeomHash vs KMC -- Jaccard",
-        "MinHash":                   "MinHash vs KMC -- Jaccard",
+        "BottomK":                   "BottomK vs KMC -- Jaccard",
         "FracMinHash (kmer-sketch)": "FracMinHash (kmer-sketch) vs KMC -- Jaccard",
         "Sourmash FracMinHash":      "Sourmash FMH vs KMC -- Jaccard",
     }
@@ -681,7 +681,7 @@ def main():
     # Display order: most to least resource-intensive
     method_order = [
         "KMC (exact)",
-        "MinHash",
+        "BottomK",
         "FracMinHash (kmer-sketch)",
         "AlphaMaxGeomHash",
     ]

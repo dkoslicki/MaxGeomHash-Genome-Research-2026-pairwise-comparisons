@@ -14,10 +14,10 @@
 #   resources_tradeoff.{pdf,png}                       — accuracy vs. resources
 #
 # Prerequisites:
-#   - 03_minhash_sketch.sh         (MinHash sketches)
+#   - 03_bottomk_sketch.sh         (BottomK sketches)
 #   - 04_fracminhash_sketch.sh     (FracMinHash kmer-sketch sketches)
 #   - 05_alphamaxgeom_sketch.sh    (AlphaMaxGeomHash sketches)
-#   - 06_minhash_pairwise.sh       (MinHash pairwise)
+#   - 06_bottomk_pairwise.sh       (BottomK pairwise)
 #   - 07_fracminhash_pairwise.sh   (FracMinHash pairwise)
 #   - 08_alphamaxgeom_pairwise.sh  (AlphaMaxGeomHash pairwise)
 #   - 09_sanity_check.py           (sanity_check_summary.json)
@@ -47,7 +47,7 @@ INCLUDE_SOURMASH="${INCLUDE_SOURMASH:-0}"  # 1 = add Sourmash FracMinHash
 
 KMC_PAIRWISE="${BASE}/data/GTDB/kmc_pairwise"
 AMG_PAIRWISE="${BASE}/data/GTDB/alphamaxgeom_pairwise"
-MH_PAIRWISE="${BASE}/data/GTDB/minhash_pairwise"
+BK_PAIRWISE="${BASE}/data/GTDB/bottomk_pairwise"
 FMH_KS_PAIRWISE="${BASE}/data/GTDB/fracminhash_pairwise"
 SOURMASH_CSV="${BASE}/data/GTDB/gtdb_pairwise_containment.csv"
 SANITY_JSON="${AMG_PAIRWISE}/sanity_check/sanity_check_summary.json"
@@ -76,7 +76,7 @@ fi
 # Build heatmap method flags (only pass directories that exist)
 HEATMAP_METHOD_FLAGS=""
 [[ -d "${AMG_PAIRWISE}" ]]    && HEATMAP_METHOD_FLAGS+=" --amg-pairwise ${AMG_PAIRWISE}"
-[[ -d "${MH_PAIRWISE}" ]]     && HEATMAP_METHOD_FLAGS+=" --minhash-pairwise ${MH_PAIRWISE}"
+[[ -d "${BK_PAIRWISE}" ]]     && HEATMAP_METHOD_FLAGS+=" --bottomk-pairwise ${BK_PAIRWISE}"
 [[ -d "${FMH_KS_PAIRWISE}" ]] && HEATMAP_METHOD_FLAGS+=" --fracminhash-pairwise ${FMH_KS_PAIRWISE}"
 if [[ "${INCLUDE_SOURMASH}" == "1" ]]; then
     HEATMAP_METHOD_FLAGS+=" --include-sourmash --sourmash-csv ${SOURMASH_CSV}"
