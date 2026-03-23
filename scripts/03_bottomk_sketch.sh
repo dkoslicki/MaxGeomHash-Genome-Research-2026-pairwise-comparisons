@@ -146,7 +146,7 @@ export -f sketch_genome_batch
 
 # Batch size: ceil(N_TODO / PARALLEL_JOBS) so every slot gets one continuous
 # chunk of work.  Floor-divide then add 1 to avoid under-filling on odd counts.
-BATCH_SIZE=$(( (N_TODO + PARALLEL_JOBS - 1) / PARALLEL_JOBS ))
+BATCH_SIZE=$(( (N_TODO + PARALLEL_JOBS * 8 - 1) / (PARALLEL_JOBS * 8) ))
 
 # ---------------------------------------------------------------------------
 # Run in parallel; capture /usr/bin/time -v for peak RAM
