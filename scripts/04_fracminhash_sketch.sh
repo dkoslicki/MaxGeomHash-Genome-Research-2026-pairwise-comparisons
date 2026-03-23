@@ -114,32 +114,35 @@ N_TODO=${N_TOTAL}
 echo "Sketching all ${N_TODO} genomes (existing sketches will be overwritten)."
 
 # ---------------------------------------------------------------------------
-# Worker function: sketch one genome directly from the uncompressed .fna file.
+# Worker function: sketch a batch of genomes in a single parallel slot.
 # ---------------------------------------------------------------------------
 export SKETCH_DIR SKETCH_BIN ALGO KMER SCALE SEED
 
-sketch_genome() {
-    local genome_path="$1"
-    local genome_name
-    genome_name=$(basename "${genome_path}" | sed 's/\.\(fna\|fa\|fasta\)$//')
-    local out_sketch="${SKETCH_DIR}/${genome_name}.fracminhash.sketch"
+sketch_genome_batch() {
+    for genome_path in "$@"; do
+        local genome_name
+        genome_name=$(basename "${genome_path}" | sed 's/\.\(fna\|fa\|fasta\)$//')
+        local out_sketch="${SKETCH_DIR}/${genome_name}.fracminhash.sketch"
 
-    if ! "${SKETCH_BIN}" \
-            --input  "${genome_path}" \
-            --kmer   "${KMER}" \
-            --algo   "${ALGO}" \
-            --scale  "${SCALE}" \
-            --seed   "${SEED}" \
-            --canonical \
-            --output "${out_sketch}" 2>/dev/null; then
-        echo "ERROR: sketching failed: ${genome_name}" >&2
-        rm -f "${out_sketch}"
-        return 1
-    fi
+        if ! "${SKETCH_BIN}" \
+                --input  "${genome_path}" \
+                --kmer   "${KMER}" \
+                --algo   "${ALGO}" \
+                --scale  "${SCALE}" \
+                --seed   "${SEED}" \
+                --canonical \
+                --output "${out_sketch}" 2>/dev/null; then
+            echo "ERROR: sketching failed: ${genome_name}" >&2
+            rm -f "${out_sketch}"
+            return 1
+        fi
 
-    echo "DONE ${genome_name}"
+        echo "DONE ${genome_name}"
+    done
 }
-export -f sketch_genome
+export -f sketch_genome_batch
+
+BATCH_SIZE=$(( (N_TODO + PARALLEL_JOBS - 1) / PARALLEL_JOBS ))
 
 # ---------------------------------------------------------------------------
 # Run in parallel; capture /usr/bin/time -v for peak RAM
@@ -147,6 +150,7 @@ export -f sketch_genome
 echo ""
 echo "Sketching ${N_TODO} genomes with ${PARALLEL_JOBS} parallel jobs ..."
 echo "  algo=${ALGO}, k=${KMER}, scale=${SCALE} (= scaled $(python3 -c "print(int(1/${SCALE}))") ), seed=${SEED}"
+echo "  batch size per slot: ${BATCH_SIZE} genomes"
 echo ""
 
 TIME_LOG=$(mktemp)
@@ -157,7 +161,8 @@ trap 'rm -f "${GENOME_LIST}" "${GENOME_LIST_TODO}" "${TIME_LOG}"' EXIT
         --jobs "${PARALLEL_JOBS}" \
         --line-buffer \
         --halt soon,fail=1 \
-        sketch_genome {} \
+        -N "${BATCH_SIZE}" \
+        sketch_genome_batch \
         < "${GENOME_LIST_TODO}" \
     2> >(tee "${TIME_LOG}" >&2)
 

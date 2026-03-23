@@ -1,0 +1,23 @@
+{
+  "_comment": "Central configuration for the MaxGeomHash genome similarity pipeline. Edit parameters here; all scripts read from this file.",
+
+  "kmer":          31,
+  "canonical":     true,
+  "seed":          42,
+
+  "parallel_jobs": 384,
+  "pairwise_cores": 384,
+
+  "alphamaxgeom": {
+    "w":     64,
+    "alpha": 0.45
+  },
+
+  "bottomk": {
+    "k": 1000
+  },
+
+  "fracminhash": {
+    "scale": 0.01
+  }
+}
