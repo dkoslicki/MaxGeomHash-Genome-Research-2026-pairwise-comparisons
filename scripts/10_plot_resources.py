@@ -91,7 +91,7 @@ plt.rcParams.update({
 # ---------------------------------------------------------------------------
 METHOD_COLORS = {
     "KMC (exact)":              {"index": "#2166AC", "pairwise": "#92C5DE"},  # blues
-    "BottomK":                  {"index": "#762A83", "pairwise": "#C2A5CF"},  # purples
+    "MinHash":                  {"index": "#762A83", "pairwise": "#C2A5CF"},  # purples
     "FracMinHash":              {"index": "#D6604D", "pairwise": "#F4A582"},  # reds
     "AlphaMaxGeomHash":         {"index": "#4DAC26", "pairwise": "#B8E186"},  # greens
     # Sourmash FracMinHash (off by default; add via --include-sourmash):
@@ -280,7 +280,7 @@ def collect_stats(base, include_sourmash=False):
     bk_sketch_json   = data / "bottomk_sketches"  / "sketch_run_stats.json"
     bk_pairwise_json = data / "bottomk_pairwise"  / "pairwise_run_stats.json"
 
-    stats["BottomK"] = {
+    stats["MinHash"] = {
         "index_seconds":    _json_cpu_seconds(bk_sketch_json,
                                               "wall_clock_seconds", "parallel_jobs"),
         "pairwise_seconds": _json_cpu_seconds(bk_pairwise_json,
@@ -475,6 +475,8 @@ def plot_disk(stats, out_dir, method_order=None):
 
     fig, ax = plt.subplots(figsize=(max(6.5, n * 1.5), 4.5))
 
+    kmc_idx_bytes = stats.get("KMC (exact)", {}).get("index_bytes") or 1.0
+
     for i, method in enumerate(methods):
         s      = stats[method]
         col    = METHOD_COLORS.get(method, {"index": "#888", "pairwise": "#BBB"})
@@ -495,6 +497,11 @@ def plot_disk(stats, out_dir, method_order=None):
             ax.text(i, bar_top * 1.05, _fmt_bytes(idx_b),
                     ha="center", va="bottom", fontsize=6.5, color="#333")
 
+        if idx_b > 0:
+            ratio = idx_b / kmc_idx_bytes
+            ax.text(i, bar_top * 1.6, f"x{ratio:.3f}",
+                    ha="center", va="bottom", fontsize=9, fontweight="bold")
+
     ax.set_yscale("log")
     ax.set_xticks(x)
     ax.set_xticklabels(methods, fontsize=8, rotation=15, ha="right")
@@ -506,6 +513,12 @@ def plot_disk(stats, out_dir, method_order=None):
     ax.set_ylim(_DISK_FLOOR_GB / 2, max(all_tops) * 5)
     ax.yaxis.grid(True, which="both", linestyle="--", linewidth=0.4, alpha=0.6)
     ax.set_axisbelow(True)
+
+    ax.annotate(
+        f"xN = sketch size relative to KMC index ({_fmt_bytes(kmc_idx_bytes)})",
+        xy=(0.01, 0.01), xycoords="axes fraction",
+        fontsize=7, va="bottom", color="#444",
+    )
 
     for suffix in (".pdf", ".png"):
         fig.savefig(out_dir / f"resources_disk{suffix}")
@@ -544,7 +557,7 @@ def plot_tradeoff(stats, sanity_json, out_dir, method_order=None):
     # 09_sanity_check.py writes labels like "AlphaMaxGeomHash vs KMC -- Jaccard"
     label_map = {
         "AlphaMaxGeomHash":          "AlphaMaxGeomHash vs KMC -- Jaccard",
-        "BottomK":                   "BottomK vs KMC -- Jaccard",
+        "MinHash":                   "BottomK vs KMC -- Jaccard",
         "FracMinHash":               "FracMinHash (kmer-sketch) vs KMC -- Jaccard",
         "Sourmash FracMinHash":      "Sourmash FMH vs KMC -- Jaccard",
     }
@@ -713,10 +726,10 @@ def main():
 
     # Display order: KMC first (exact baseline), then sketch methods
     # left-to-right by increasing resource usage (theory prediction):
-    #   BottomK < AlphaMaxGeomHash < FracMinHash
+    #   MinHash < AlphaMaxGeomHash < FracMinHash
     method_order = [
         "KMC (exact)",
-        "BottomK",
+        "MinHash",
         "AlphaMaxGeomHash",
         "FracMinHash",
     ]

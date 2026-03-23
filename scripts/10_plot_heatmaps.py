@@ -590,7 +590,7 @@ def main():
         )
 
     amg  = _load_npz_dir(args.amg_pairwise,          "AlphaMaxGeomHash")
-    bk   = _load_npz_dir(args.bottomk_pairwise,       "BottomK")
+    bk   = _load_npz_dir(args.bottomk_pairwise,       "MinHash")
     fmh_ks = _load_npz_dir(args.fracminhash_pairwise, "FracMinHash (kmer-sketch)")
 
     # Sourmash FracMinHash CSV (optional; excluded by default)
@@ -625,7 +625,7 @@ def main():
     # Each entry: {"label": str, "err": M×M relative error array, "l1": float}
     # ------------------------------------------------------------------
     method_specs = [
-        (bk,     "BottomK\n(k=1000, kmer=31)"),
+        (bk,     "MinHash\n(k=1000, kmer=31)"),
         (amg,    "AlphaMaxGeomHash\n(W=64, α=0.45, k=31)"),
         (fmh_ks, "FracMinHash\n(scale=0.01, k=31)"),
         (fmh_ss, "Sourmash FracMinHash\n(scaled=1000, k=31)"),
