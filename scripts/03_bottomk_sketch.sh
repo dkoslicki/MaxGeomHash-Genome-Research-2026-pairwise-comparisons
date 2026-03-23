@@ -8,15 +8,17 @@
 # Algorithm:  bottomk  (--k 1000)
 # K-mer size: 31, canonical k-mers, seed=42
 #
-# Genomes are stored compressed (.fna.gz).  Each genome is decompressed to
-# a per-job temp file, sketched, and the temp file immediately deleted.
-# Compressed originals are never modified.
+# Reads from the pre-decompressed flat FASTA directory created by
+# 00_decompress_genomes.sh.  Run that script once before running this one.
+# The sketch binary reads .fna files directly — no per-job decompression,
+# no temp files — which keeps all CPUs busy.
 #
 # Outputs:
 #   data/GTDB/bottomk_sketches/{genome_id}.bottomk.sketch  (one per genome)
 #   data/GTDB/bottomk_sketches/sketch_run_stats.json       (timing + disk usage)
 #
 # Prerequisites:
+#   bash scripts/00_decompress_genomes.sh   (once, before first sketch run)
 #   GNU parallel  (apt: parallel)
 #   sketch binary compiled in scripts/kmer-sketch/bin/
 #
@@ -33,7 +35,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 BASE_DIR="/scratch/shared_data/MaxGeomHash_Genome_Research_2026"
 GTDB_DIR="${BASE_DIR}/data/GTDB"
-MANIFEST="${GTDB_DIR}/manysketch.csv"           # name,genome_filename,protein_filename
+MANIFEST="${GTDB_DIR}/manysketch_uncompressed.csv"   # points to plain .fna files
 SKETCH_DIR="${GTDB_DIR}/bottomk_sketches"
 SKETCH_BIN="${BASE_DIR}/scripts/kmer-sketch/bin/sketch"
 
@@ -53,21 +55,16 @@ K=$(cfg "['bottomk']['k']")
 PARALLEL_JOBS=$(cfg "['parallel_jobs']")
 
 # ---------------------------------------------------------------------------
-# Test mode: set TEST_N to a positive integer to process only the first N
-# genomes from the manifest.  Leave at 0 (default) to process all genomes.
-# Override at the command line: TEST_N=500 bash 03_bottomk_sketch.sh
+# Test mode
 # ---------------------------------------------------------------------------
 TEST_N="${TEST_N:-0}"
 
 # ---------------------------------------------------------------------------
 # Sanity checks
 # ---------------------------------------------------------------------------
-for cmd in parallel gunzip; do
-    if ! command -v "${cmd}" &>/dev/null; then
-        echo "ERROR: '${cmd}' not found in PATH." >&2
-        exit 1
-    fi
-done
+if ! command -v parallel &>/dev/null; then
+    echo "ERROR: 'parallel' not found in PATH." >&2; exit 1
+fi
 
 if [[ ! -f "${SKETCH_BIN}" ]]; then
     echo "ERROR: sketch binary not found: ${SKETCH_BIN}" >&2
@@ -76,7 +73,8 @@ if [[ ! -f "${SKETCH_BIN}" ]]; then
 fi
 
 if [[ ! -f "${MANIFEST}" ]]; then
-    echo "ERROR: manysketch manifest not found: ${MANIFEST}" >&2
+    echo "ERROR: uncompressed manifest not found: ${MANIFEST}" >&2
+    echo "       Run scripts/00_decompress_genomes.sh first." >&2
     exit 1
 fi
 
@@ -86,18 +84,15 @@ mkdir -p "${SKETCH_DIR}"
 # Timing and cleanup
 # ---------------------------------------------------------------------------
 SECONDS=0
-TIME_LOG=$(mktemp)
 GENOME_LIST=$(mktemp)
 GENOME_LIST_TODO=$(mktemp)
-trap 'rm -f "${TIME_LOG}" "${GENOME_LIST}" "${GENOME_LIST_TODO}"' EXIT
+trap 'rm -f "${GENOME_LIST}" "${GENOME_LIST_TODO}"' EXIT
 
 # ---------------------------------------------------------------------------
 # Extract genome paths from the manifest (column 2: genome_filename)
 # ---------------------------------------------------------------------------
 if [[ "${TEST_N}" -gt 0 ]]; then
     echo "TEST MODE: restricting to first ${TEST_N} genomes."
-    # Use awk for line-limiting instead of tail|head|awk — the tail|head combination
-    # causes SIGPIPE on tail under set -o pipefail, making the script exit early.
     awk -v n="${TEST_N}" -F',' 'NR > 1 && NR <= n+1 {print $2}' "${MANIFEST}" \
         > "${GENOME_LIST}"
 else
@@ -116,32 +111,19 @@ N_TODO=${N_TOTAL}
 echo "Sketching all ${N_TODO} genomes (existing sketches will be overwritten)."
 
 # ---------------------------------------------------------------------------
-# Worker function: decompress one genome and sketch it
-# Exported so GNU parallel can call it in a subshell
+# Worker function: sketch one genome directly from the uncompressed .fna file.
+# No decompression, no temp file — the sketch binary reads the .fna directly.
 # ---------------------------------------------------------------------------
 export SKETCH_DIR SKETCH_BIN ALGO KMER K SEED
 
 sketch_genome() {
     local genome_path="$1"
     local genome_name
-    genome_name=$(basename "${genome_path}" \
-        | sed 's/\.\(fna\|fa\|fasta\)\.gz$//; s/\.gz$//')
+    genome_name=$(basename "${genome_path}" | sed 's/\.\(fna\|fa\|fasta\)$//')
     local out_sketch="${SKETCH_DIR}/${genome_name}.bottomk.sketch"
 
-    # Per-job temp file: unique name avoids conflicts among parallel workers
-    local tmp_fasta
-    tmp_fasta=$(mktemp --suffix=".fasta")
-    trap "rm -f '${tmp_fasta}'" RETURN   # always delete, even on error
-
-    # Decompress with -c (stdout); never touches the original .gz file
-    if ! gunzip -c "${genome_path}" > "${tmp_fasta}" 2>/dev/null; then
-        echo "ERROR: decompression failed: ${genome_path}" >&2
-        return 1
-    fi
-
-    # Create the BottomK sketch
     if ! "${SKETCH_BIN}" \
-            --input    "${tmp_fasta}" \
+            --input    "${genome_path}" \
             --kmer     "${KMER}" \
             --algo     "${ALGO}" \
             --k        "${K}" \
@@ -149,7 +131,7 @@ sketch_genome() {
             --canonical \
             --output   "${out_sketch}" 2>/dev/null; then
         echo "ERROR: sketching failed: ${genome_name}" >&2
-        rm -f "${out_sketch}"   # remove partial output
+        rm -f "${out_sketch}"
         return 1
     fi
 
@@ -164,6 +146,9 @@ echo ""
 echo "Sketching ${N_TODO} genomes with ${PARALLEL_JOBS} parallel jobs ..."
 echo "  algo=${ALGO}, kmer=${KMER}, k=${K}, seed=${SEED}"
 echo ""
+
+TIME_LOG=$(mktemp)
+trap 'rm -f "${GENOME_LIST}" "${GENOME_LIST_TODO}" "${TIME_LOG}"' EXIT
 
 /usr/bin/time -v \
     parallel \
@@ -197,7 +182,6 @@ else
     peak_ram_human="unavailable"
 fi
 
-# Write JSON stats for downstream comparison
 STATS_FILE="${SKETCH_DIR}/sketch_run_stats.json"
 python3 - <<PYEOF
 import json
@@ -234,11 +218,4 @@ printf "  Parameters        : algo=%s  kmer=%d  k=%d  seed=%d\n" \
 echo "========================================================================="
 echo ""
 echo "Next step:"
-echo "  python3 ${BASE_DIR}/scripts/06_bottomk_pairwise.py \\"
-echo "      --sketch-dir ${SKETCH_DIR} \\"
-echo "      --candidates ${GTDB_DIR}/gtdb_pairwise_containment.csv \\"
-echo "      --output     ${GTDB_DIR}/bottomk_pairwise \\"
-echo "      --cores      192"
-echo ""
-echo "Or run the wrapper:"
 echo "  bash ${BASE_DIR}/scripts/06_bottomk_pairwise.sh"
