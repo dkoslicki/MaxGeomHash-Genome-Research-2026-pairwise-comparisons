@@ -414,7 +414,7 @@ def plot_time(stats, out_dir, method_order=None):
         pw_h  = pw_s / 3600
 
         ax.bar(i, pw_h, width, bottom=floor,
-               color=col["pairwise"], edgecolor="white", linewidth=0.5)
+               color=col["index"], edgecolor="white", linewidth=0.5)
 
         bar_top = floor + pw_h
 
@@ -598,6 +598,79 @@ def plot_tradeoff(stats, sanity_json, out_dir, method_order=None):
 
 
 # ---------------------------------------------------------------------------
+# Figure 4 -- Pairwise accuracy  (L1 error bar chart, one per metric)
+# ---------------------------------------------------------------------------
+
+def plot_accuracy(l1_json, out_dir, metric, method_order=None):
+    """
+    Bar chart of total raw L1 error (sum of |estimate − KMC exact| over the
+    lower-triangle pairs in the N-genome subset) for each sketching method.
+
+    L1 values are read from l1_errors.json written by 10_plot_heatmaps.py.
+    KMC (exact) is the reference and is excluded from this chart.
+
+    Parameters
+    ----------
+    l1_json     : path to l1_errors.json (written by 10_plot_heatmaps.py)
+    out_dir     : output directory
+    metric      : "jaccard" or "max_containment"
+    method_order: display order (KMC will be skipped automatically)
+    """
+    l1_json = Path(l1_json)
+    if not l1_json.exists():
+        log.warning("L1 errors file not found (%s) — skipping accuracy bar chart "
+                    "for %s.  Run 10_plot_heatmaps.py first.", l1_json, metric)
+        return
+
+    with open(l1_json) as f:
+        all_l1 = json.load(f)
+
+    l1_for_metric = all_l1.get(metric)
+    if not l1_for_metric:
+        log.warning("No L1 data for metric '%s' in %s — skipping.", metric, l1_json)
+        return
+
+    # Build ordered list, skipping KMC and any method not in the L1 data
+    sketch_methods = [m for m in (method_order or list(l1_for_metric.keys()))
+                      if m != "KMC (exact)" and m in l1_for_metric]
+    if not sketch_methods:
+        log.warning("No sketch-method L1 data found for metric '%s' — skipping.", metric)
+        return
+
+    n     = len(sketch_methods)
+    x     = np.arange(n)
+    width = 0.55
+
+    fig, ax = plt.subplots(figsize=(max(5.0, n * 1.5), 4.5))
+
+    for i, method in enumerate(sketch_methods):
+        col  = METHOD_COLORS.get(method, {"index": "#888"})["index"]
+        l1   = l1_for_metric[method]
+        bar  = ax.bar(i, l1, width, color=col, edgecolor="white", linewidth=0.5)
+        ax.text(i, l1 * 1.02, f"{l1:.2f}",
+                ha="center", va="bottom", fontsize=8, color="#222")
+
+    metric_label = {
+        "jaccard":         "Jaccard",
+        "max_containment": "Max containment",
+    }.get(metric, metric)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(sketch_methods, fontsize=8, rotation=15, ha="right")
+    ax.set_ylabel(f"Total L1 error  (|estimate − KMC exact|,  {metric_label})", fontsize=9)
+    ax.set_ylim(0, max(l1_for_metric[m] for m in sketch_methods) * 1.2)
+    ax.yaxis.grid(True, linestyle="--", linewidth=0.4, alpha=0.6)
+    ax.set_axisbelow(True)
+
+    stem = f"accuracy_l1_{metric}"
+    for suffix in (".pdf", ".png"):
+        fpath = out_dir / (stem + suffix)
+        fig.savefig(fpath)
+        log.info("Saved: %s", fpath)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -680,6 +753,14 @@ def main():
 
     log.info("Generating accuracy vs. resource trade-off figure ...")
     plot_tradeoff(stats, sanity_json, out_dir, method_order)
+
+    # L1 accuracy bar charts (one per metric).
+    # l1_errors.json is written by 10_plot_heatmaps.py into the same output dir.
+    l1_json = out_dir / "l1_errors.json"
+    sketch_method_order = [m for m in method_order if m != "KMC (exact)"]
+    for metric in ("jaccard", "max_containment"):
+        log.info("Generating L1 accuracy bar chart (%s) ...", metric)
+        plot_accuracy(l1_json, out_dir, metric, sketch_method_order)
 
     summary_path = out_dir / "resource_summary.json"
     with open(summary_path, "w") as f:

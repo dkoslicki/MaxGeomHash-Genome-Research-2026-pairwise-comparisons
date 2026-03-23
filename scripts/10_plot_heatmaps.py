@@ -688,6 +688,21 @@ def main():
         show_reference = args.show_reference,
     )
 
+    # Save L1 errors so 10_plot_resources.py can build the accuracy bar chart.
+    # We load+update rather than overwrite so that jaccard and max_containment
+    # runs accumulate into the same file.
+    l1_json_path = out_dir / "l1_errors.json"
+    existing_l1 = {}
+    if l1_json_path.exists():
+        with open(l1_json_path) as f:
+            existing_l1 = json.load(f)
+    existing_l1[metric] = {
+        m["label"].split("\n")[0]: m["l1"] for m in methods
+    }
+    with open(l1_json_path, "w") as f:
+        json.dump(existing_l1, f, indent=2)
+    log.info("L1 errors written to %s", l1_json_path)
+
     # Save the genome ordering so other scripts can reuse it
     ordering_path = out_dir / f"genome_subset_order_{metric}.json"
     with open(ordering_path, "w") as f:
