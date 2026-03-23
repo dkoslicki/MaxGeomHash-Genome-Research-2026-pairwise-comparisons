@@ -92,7 +92,7 @@ plt.rcParams.update({
 METHOD_COLORS = {
     "KMC (exact)":              {"index": "#2166AC", "pairwise": "#92C5DE"},  # blues
     "BottomK":                  {"index": "#762A83", "pairwise": "#C2A5CF"},  # purples
-    "FracMinHash (kmer-sketch)":{"index": "#D6604D", "pairwise": "#F4A582"},  # reds
+    "FracMinHash":              {"index": "#D6604D", "pairwise": "#F4A582"},  # reds
     "AlphaMaxGeomHash":         {"index": "#4DAC26", "pairwise": "#B8E186"},  # greens
     # Sourmash FracMinHash (off by default; add via --include-sourmash):
     "Sourmash FracMinHash":     {"index": "#8C510A", "pairwise": "#DFC27D"},  # browns
@@ -314,7 +314,7 @@ def collect_stats(base, include_sourmash=False):
     fmh_ks_sketch_json   = data / "fracminhash_sketches" / "sketch_run_stats.json"
     fmh_ks_pairwise_json = data / "fracminhash_pairwise" / "pairwise_run_stats.json"
 
-    stats["FracMinHash (kmer-sketch)"] = {
+    stats["FracMinHash"] = {
         "index_seconds":    _json_cpu_seconds(fmh_ks_sketch_json,
                                               "wall_clock_seconds", "parallel_jobs"),
         "pairwise_seconds": _json_cpu_seconds(fmh_ks_pairwise_json,
@@ -390,10 +390,9 @@ def _log_center(lo, hi):
 
 def plot_time(stats, out_dir, method_order=None):
     """
-    Stacked bar chart (log y-scale) of CPU time (hours).
+    Bar chart (log y-scale) of pairwise-similarity CPU time (hours) only.
     CPU seconds = wall_clock_seconds × number of cores used.
-    Darker segment = indexing / sketching.
-    Lighter segment = pairwise similarity computation.
+    Indexing / sketching time is excluded.
     """
     if method_order is None:
         method_order = list(stats.keys())
@@ -409,48 +408,28 @@ def plot_time(stats, out_dir, method_order=None):
     kmc_pairwise_s = stats.get("KMC (exact)", {}).get("pairwise_seconds") or 1.0
 
     for i, method in enumerate(methods):
-        s      = stats[method]
-        col    = METHOD_COLORS.get(method, {"index": "#888", "pairwise": "#BBB"})
-        idx_s  = s["index_seconds"]    or 0.0
-        pw_s   = s["pairwise_seconds"] or 0.0
-        idx_h  = idx_s / 3600
-        pw_h   = pw_s  / 3600
+        s     = stats[method]
+        col   = METHOD_COLORS.get(method, {"index": "#888", "pairwise": "#BBB"})
+        pw_s  = s["pairwise_seconds"] or 0.0
+        pw_h  = pw_s / 3600
 
-        ax.bar(i, idx_h,  width, bottom=floor,
-               color=col["index"],    edgecolor="white", linewidth=0.5)
-        ax.bar(i, pw_h,   width, bottom=floor + idx_h,
+        ax.bar(i, pw_h, width, bottom=floor,
                color=col["pairwise"], edgecolor="white", linewidth=0.5)
 
-        bar_top = floor + idx_h + pw_h
+        bar_top = floor + pw_h
 
-        if idx_h > 0 and (floor + idx_h) / floor > 2.0:
-            cy = _log_center(floor, floor + idx_h)
-            ax.text(i, cy, _fmt_time(idx_s),
-                    ha="center", va="center", fontsize=7,
-                    color="white", fontweight="bold")
-        if pw_h > 0 and bar_top / (floor + idx_h) > 2.0:
-            cy = _log_center(floor + idx_h, bar_top)
+        # Label inside bar if it's tall enough, otherwise above
+        if pw_h > 0 and bar_top / floor > 2.0:
+            cy = _log_center(floor, bar_top)
             ax.text(i, cy, _fmt_time(pw_s),
                     ha="center", va="center", fontsize=7,
                     color="white", fontweight="bold")
-
-        if idx_h > 0 and (floor + idx_h) / floor <= 2.0:
-            ax.text(i, floor + idx_h * 1.05,
-                    f"sketch: {_fmt_time(idx_s)}",
-                    ha="center", va="bottom", fontsize=6.5, color="#333")
-        if pw_h > 0 and bar_top / (floor + idx_h) <= 2.0:
-            ax.text(i, bar_top * 1.05,
-                    f"pairwise: {_fmt_time(pw_s)}",
+        elif pw_h > 0:
+            ax.text(i, bar_top * 1.05, _fmt_time(pw_s),
                     ha="center", va="bottom", fontsize=6.5, color="#333")
 
-        if s["index_seconds"] is None:
-            ax.text(i, floor * 1.3, "indexing\nN/A",
-                    ha="center", va="bottom", fontsize=6, color="#666",
-                    style="italic")
-
-        total_s = (s["index_seconds"] or 0) + (s["pairwise_seconds"] or 0)
-        if total_s > 0:
-            ratio = total_s / kmc_pairwise_s
+        if pw_s > 0:
+            ratio = pw_s / kmc_pairwise_s
             ax.text(i, bar_top * 1.6,
                     f"x{ratio:.2f}",
                     ha="center", va="bottom", fontsize=9, fontweight="bold")
@@ -458,23 +437,17 @@ def plot_time(stats, out_dir, method_order=None):
     ax.set_yscale("log")
     ax.set_xticks(x)
     ax.set_xticklabels(methods, fontsize=8, rotation=15, ha="right")
-    ax.set_ylabel("CPU time (hours, log scale)", fontsize=9)
+    ax.set_ylabel("Pairwise similarity CPU time (hours, log scale)", fontsize=9)
     all_tops = [
-        _TIME_FLOOR_H + (s.get("index_seconds") or 0) / 3600
-                      + (s.get("pairwise_seconds") or 0) / 3600
+        _TIME_FLOOR_H + (s.get("pairwise_seconds") or 0) / 3600
         for s in stats.values()
     ]
     ax.set_ylim(_TIME_FLOOR_H / 2, max(all_tops) * 5)
     ax.yaxis.grid(True, which="both", linestyle="--", linewidth=0.4, alpha=0.6)
     ax.set_axisbelow(True)
 
-    legend_handles = [
-        mpatches.Patch(color="#555555", label="Indexing / k-mer counting / sketching"),
-        mpatches.Patch(color="#AAAAAA", label="Pairwise similarity computation"),
-    ]
-    ax.legend(handles=legend_handles, fontsize=8, loc="upper left")
     ax.annotate(
-        f"xN = total CPU time relative to KMC pairwise ({_fmt_time(kmc_pairwise_s)})",
+        f"xN = pairwise CPU time relative to KMC pairwise ({_fmt_time(kmc_pairwise_s)})",
         xy=(0.01, 0.01), xycoords="axes fraction",
         fontsize=7, va="bottom", color="#444",
     )
@@ -502,8 +475,6 @@ def plot_disk(stats, out_dir, method_order=None):
 
     fig, ax = plt.subplots(figsize=(max(6.5, n * 1.5), 4.5))
 
-    kmc_idx_bytes = stats.get("KMC (exact)", {}).get("index_bytes") or 1.0
-
     for i, method in enumerate(methods):
         s      = stats[method]
         col    = METHOD_COLORS.get(method, {"index": "#888", "pairwise": "#BBB"})
@@ -524,11 +495,6 @@ def plot_disk(stats, out_dir, method_order=None):
             ax.text(i, bar_top * 1.05, _fmt_bytes(idx_b),
                     ha="center", va="bottom", fontsize=6.5, color="#333")
 
-        ratio = idx_b / kmc_idx_bytes
-        ax.text(i, bar_top * 1.6,
-                f"x{ratio:.2f}",
-                ha="center", va="bottom", fontsize=9, fontweight="bold")
-
     ax.set_yscale("log")
     ax.set_xticks(x)
     ax.set_xticklabels(methods, fontsize=8, rotation=15, ha="right")
@@ -540,12 +506,6 @@ def plot_disk(stats, out_dir, method_order=None):
     ax.set_ylim(_DISK_FLOOR_GB / 2, max(all_tops) * 5)
     ax.yaxis.grid(True, which="both", linestyle="--", linewidth=0.4, alpha=0.6)
     ax.set_axisbelow(True)
-
-    ax.annotate(
-        f"xN = sketch size relative to KMC index ({_fmt_bytes(kmc_idx_bytes)})",
-        xy=(0.01, 0.01), xycoords="axes fraction",
-        fontsize=7, va="bottom", color="#444",
-    )
 
     for suffix in (".pdf", ".png"):
         fig.savefig(out_dir / f"resources_disk{suffix}")
@@ -585,7 +545,7 @@ def plot_tradeoff(stats, sanity_json, out_dir, method_order=None):
     label_map = {
         "AlphaMaxGeomHash":          "AlphaMaxGeomHash vs KMC -- Jaccard",
         "BottomK":                   "BottomK vs KMC -- Jaccard",
-        "FracMinHash (kmer-sketch)": "FracMinHash (kmer-sketch) vs KMC -- Jaccard",
+        "FracMinHash":               "FracMinHash (kmer-sketch) vs KMC -- Jaccard",
         "Sourmash FracMinHash":      "Sourmash FMH vs KMC -- Jaccard",
     }
     for display_name, stat_key in label_map.items():
@@ -685,7 +645,7 @@ def main():
         "KMC (exact)",
         "BottomK",
         "AlphaMaxGeomHash",
-        "FracMinHash (kmer-sketch)",
+        "FracMinHash",
     ]
     if args.include_sourmash:
         method_order.append("Sourmash FracMinHash")

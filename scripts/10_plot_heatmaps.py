@@ -627,7 +627,7 @@ def main():
     method_specs = [
         (bk,     "BottomK\n(k=1000, kmer=31)"),
         (amg,    "AlphaMaxGeomHash\n(W=64, α=0.45, k=31)"),
-        (fmh_ks, "FracMinHash\n(kmer-sketch, scale=0.01, k=31)"),
+        (fmh_ks, "FracMinHash\n(scale=0.01, k=31)"),
         (fmh_ss, "Sourmash FracMinHash\n(scaled=1000, k=31)"),
     ]
 
