@@ -470,10 +470,11 @@ def plot_heatmaps(kmc_sim: np.ndarray,
     # --- Error panels (one per sketching method) ---
     for col, m in enumerate(methods, start=panel_idx):
         ax  = fig.add_subplot(gs[0, col])
+        l1_str = f"L1 = {m['l1']:.4f}" if m.get("l1") is not None else ""
         img = _draw_heatmap(
             ax, m["err"], cmap_err,
             vmin=0.0, vmax=vmax_err,
-            title=f"{m['label']}\n|error| / KMC ({metric_label})",
+            title=f"{m['label']}\n|error| / KMC ({metric_label})  {l1_str}",
         )
 
     # Shared colorbar for all error panels (spans all error-panel columns)
@@ -620,14 +621,19 @@ def main():
 
     # ------------------------------------------------------------------
     # Build the METHODS list dynamically from whichever datasets loaded
-    # Each entry: {"label": str, "err": M×M relative error array}
+    # Order: BottomK → AlphaMaxGeomHash → FracMinHash (increasing resources)
+    # Each entry: {"label": str, "err": M×M relative error array, "l1": float}
     # ------------------------------------------------------------------
     method_specs = [
-        (amg,    "AlphaMaxGeomHash\n(W=64, α=0.45, k=31)"),
         (bk,     "BottomK\n(k=1000, kmer=31)"),
-        (fmh_ks, "FracMinHash\n(kmer-sketch, scale=0.001, k=31)"),
+        (amg,    "AlphaMaxGeomHash\n(W=64, α=0.45, k=31)"),
+        (fmh_ks, "FracMinHash\n(kmer-sketch, scale=0.01, k=31)"),
         (fmh_ss, "Sourmash FracMinHash\n(scaled=1000, k=31)"),
     ]
+
+    # Precompute lower-triangle indices once for L1 computation
+    _ii_tri, _jj_tri = np.tril_indices(M, k=-1)
+    kmc_tri = kmc_sim[_ii_tri, _jj_tri]
 
     methods = []
     for dataset, label in method_specs:
@@ -635,13 +641,19 @@ def main():
             continue
         sim = build_submatrix(dataset["keys"], dataset[metric], selected, N)
         err = relative_error_matrix(sim, kmc_sim)
-        methods.append({"label": label, "err": err})
+
+        # Raw L1: sum of |estimate - ground_truth| over valid lower-triangle pairs
+        est_tri   = sim[_ii_tri, _jj_tri]
+        valid_l1  = (~np.isnan(kmc_tri)) & (~np.isnan(est_tri))
+        l1_error  = float(np.sum(np.abs(est_tri[valid_l1] - kmc_tri[valid_l1])))
+
+        methods.append({"label": label, "err": err, "l1": l1_error})
 
         valid = err[~np.isnan(err)]
         if len(valid):
-            log.info("  %s relative error: median=%.4f  99pct=%.4f  max=%.4f",
+            log.info("  %s  relative error: median=%.4f  99pct=%.4f  max=%.4f  L1=%.4f",
                      label.split("\n")[0], np.median(valid),
-                     np.percentile(valid, 99), valid.max())
+                     np.percentile(valid, 99), valid.max(), l1_error)
 
     if not methods:
         log.error("No method data loaded — provide at least one of "

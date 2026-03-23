@@ -171,6 +171,23 @@ def _json_stat(json_path, key):
     return data.get(key)
 
 
+def _json_cpu_seconds(json_path, time_key="wall_clock_seconds", cores_key="cores"):
+    """
+    Compute CPU seconds from a run_stats JSON file.
+    Returns wall_clock_seconds * cores, or None if either field is missing.
+    """
+    json_path = Path(json_path)
+    if not json_path.exists():
+        return None
+    with open(json_path) as f:
+        data = json.load(f)
+    wall_s = data.get(time_key)
+    cores  = data.get(cores_key)
+    if wall_s is None or cores is None:
+        return None
+    return float(wall_s) * float(cores)
+
+
 def disk_bytes(*paths):
     """
     Return the total size in bytes of one or more files or directories.
@@ -226,78 +243,53 @@ def collect_stats(base, include_sourmash=False):
 
     # ------------------------------------------------------------------
     # KMC (exact)
+    # No run_stats JSON exists for KMC; timing is read from log files and
+    # converted to CPU seconds using the known core counts:
+    #   counting  : 96 parallel jobs × 4 threads/job = 384 cores
+    #   pairwise  : 192 worker processes (--cores 192 in 02_kmc_pairwise.sh)
+    # The KMC counting log crashed before completion, so index time is None.
     # ------------------------------------------------------------------
-    kmc_index_s    = _parse_gnu_time_elapsed(scripts / "01_kmc_count.log")
-    kmc_pairwise_s = _parse_run_summary_hms(scripts / "02_kmc_pairwise.log",
-                                             "Wall-clock time")
-    if kmc_pairwise_s is None:
-        kmc_pairwise_s = _parse_gnu_time_elapsed(scripts / "02_kmc_pairwise.log")
+    _KMC_COUNT_CORES    = 384   # 96 parallel_jobs × 4 threads each
+    _KMC_PAIRWISE_CORES = 192   # --cores 192 in 02_kmc_pairwise.sh
 
-    kmc_index_ram_kb    = _parse_gnu_time_ram_kb(scripts / "01_kmc_count.log")
-    kmc_pairwise_ram_kb = _parse_gnu_time_ram_kb(scripts / "02_kmc_pairwise.log")
+    kmc_index_wall_s    = _parse_gnu_time_elapsed(scripts / "01_kmc_count.log")
+    kmc_pairwise_wall_s = _parse_run_summary_hms(scripts / "02_kmc_pairwise.log",
+                                                  "Wall-clock time")
+    if kmc_pairwise_wall_s is None:
+        kmc_pairwise_wall_s = _parse_gnu_time_elapsed(scripts / "02_kmc_pairwise.log")
+
+    kmc_index_s    = (kmc_index_wall_s    * _KMC_COUNT_CORES
+                      if kmc_index_wall_s    is not None else None)
+    kmc_pairwise_s = (kmc_pairwise_wall_s * _KMC_PAIRWISE_CORES
+                      if kmc_pairwise_wall_s is not None else None)
 
     stats["KMC (exact)"] = {
         "index_seconds":    kmc_index_s,
         "pairwise_seconds": kmc_pairwise_s,
         "index_bytes":      disk_bytes(data / "kmc_dbs"),
         "pairwise_bytes":   disk_bytes(data / "kmc_pairwise"),
-        "index_ram_kb":     kmc_index_ram_kb,
-        "pairwise_ram_kb":  kmc_pairwise_ram_kb,
+        "index_ram_kb":     None,
+        "pairwise_ram_kb":  None,
     }
 
     # ------------------------------------------------------------------
     # BottomK
+    # CPU seconds = wall_clock_seconds × parallel_jobs (sketch)
+    #             = wall_clock_seconds × cores          (pairwise)
     # ------------------------------------------------------------------
     bk_sketch_json   = data / "bottomk_sketches"  / "sketch_run_stats.json"
     bk_pairwise_json = data / "bottomk_pairwise"  / "pairwise_run_stats.json"
 
-    bk_index_s    = _json_stat(bk_sketch_json,   "wall_clock_seconds")
-    bk_pairwise_s = _json_stat(bk_pairwise_json, "wall_clock_seconds")
-
     stats["BottomK"] = {
-        "index_seconds":    bk_index_s,
-        "pairwise_seconds": bk_pairwise_s,
+        "index_seconds":    _json_cpu_seconds(bk_sketch_json,
+                                              "wall_clock_seconds", "parallel_jobs"),
+        "pairwise_seconds": _json_cpu_seconds(bk_pairwise_json,
+                                              "wall_clock_seconds", "cores"),
         "index_bytes":      disk_bytes(data / "bottomk_sketches"),
         "pairwise_bytes":   disk_bytes(data / "bottomk_pairwise"),
         "index_ram_kb":     None,
         "pairwise_ram_kb":  None,
     }
-    if bk_sketch_json.exists():
-        with open(bk_sketch_json) as f:
-            jd = json.load(f)
-        ram_str = jd.get("peak_ram", "")
-        m = re.match(r"([\d.]+)\s*(\w+)", ram_str)
-        if m:
-            val, unit = float(m.group(1)), m.group(2).upper()
-            mult = {"KB": 1, "MB": 1024, "GB": 1024**2}.get(unit, 1)
-            stats["BottomK"]["index_ram_kb"] = val * mult
-
-    # ------------------------------------------------------------------
-    # FracMinHash (kmer-sketch binary)
-    # ------------------------------------------------------------------
-    fmh_ks_sketch_json   = data / "fracminhash_sketches" / "sketch_run_stats.json"
-    fmh_ks_pairwise_json = data / "fracminhash_pairwise" / "pairwise_run_stats.json"
-
-    fmh_ks_index_s    = _json_stat(fmh_ks_sketch_json,   "wall_clock_seconds")
-    fmh_ks_pairwise_s = _json_stat(fmh_ks_pairwise_json, "wall_clock_seconds")
-
-    stats["FracMinHash (kmer-sketch)"] = {
-        "index_seconds":    fmh_ks_index_s,
-        "pairwise_seconds": fmh_ks_pairwise_s,
-        "index_bytes":      disk_bytes(data / "fracminhash_sketches"),
-        "pairwise_bytes":   disk_bytes(data / "fracminhash_pairwise"),
-        "index_ram_kb":     None,
-        "pairwise_ram_kb":  None,
-    }
-    if fmh_ks_sketch_json.exists():
-        with open(fmh_ks_sketch_json) as f:
-            jd = json.load(f)
-        ram_str = jd.get("peak_ram", "")
-        m = re.match(r"([\d.]+)\s*(\w+)", ram_str)
-        if m:
-            val, unit = float(m.group(1)), m.group(2).upper()
-            mult = {"KB": 1, "MB": 1024, "GB": 1024**2}.get(unit, 1)
-            stats["FracMinHash (kmer-sketch)"]["index_ram_kb"] = val * mult
 
     # ------------------------------------------------------------------
     # AlphaMaxGeomHash
@@ -305,41 +297,48 @@ def collect_stats(base, include_sourmash=False):
     amg_sketch_json   = data / "alphamaxgeom_sketches"  / "sketch_run_stats.json"
     amg_pairwise_json = data / "alphamaxgeom_pairwise"  / "pairwise_run_stats.json"
 
-    amg_index_s    = _json_stat(amg_sketch_json,   "wall_clock_seconds")
-    amg_pairwise_s = _json_stat(amg_pairwise_json, "wall_clock_seconds")
-
     stats["AlphaMaxGeomHash"] = {
-        "index_seconds":    amg_index_s,
-        "pairwise_seconds": amg_pairwise_s,
+        "index_seconds":    _json_cpu_seconds(amg_sketch_json,
+                                              "wall_clock_seconds", "parallel_jobs"),
+        "pairwise_seconds": _json_cpu_seconds(amg_pairwise_json,
+                                              "wall_clock_seconds", "cores"),
         "index_bytes":      disk_bytes(data / "alphamaxgeom_sketches"),
         "pairwise_bytes":   disk_bytes(data / "alphamaxgeom_pairwise"),
         "index_ram_kb":     None,
         "pairwise_ram_kb":  None,
     }
-    if amg_sketch_json.exists():
-        with open(amg_sketch_json) as f:
-            jd = json.load(f)
-        ram_str = jd.get("peak_ram", "")
-        m = re.match(r"([\d.]+)\s*(\w+)", ram_str)
-        if m:
-            val, unit = float(m.group(1)), m.group(2).upper()
-            mult = {"KB": 1, "MB": 1024, "GB": 1024**2}.get(unit, 1)
-            stats["AlphaMaxGeomHash"]["index_ram_kb"] = val * mult
+
+    # ------------------------------------------------------------------
+    # FracMinHash (kmer-sketch binary)
+    # ------------------------------------------------------------------
+    fmh_ks_sketch_json   = data / "fracminhash_sketches" / "sketch_run_stats.json"
+    fmh_ks_pairwise_json = data / "fracminhash_pairwise" / "pairwise_run_stats.json"
+
+    stats["FracMinHash (kmer-sketch)"] = {
+        "index_seconds":    _json_cpu_seconds(fmh_ks_sketch_json,
+                                              "wall_clock_seconds", "parallel_jobs"),
+        "pairwise_seconds": _json_cpu_seconds(fmh_ks_pairwise_json,
+                                              "wall_clock_seconds", "cores"),
+        "index_bytes":      disk_bytes(data / "fracminhash_sketches"),
+        "pairwise_bytes":   disk_bytes(data / "fracminhash_pairwise"),
+        "index_ram_kb":     None,
+        "pairwise_ram_kb":  None,
+    }
 
     # ------------------------------------------------------------------
     # Sourmash FracMinHash (optional; excluded by default)
+    # Sourmash has no run_stats JSON; fall back to log-file wall-clock time.
+    # The core count for sourmash is not recorded, so CPU time is unavailable
+    # and we store None.
     # ------------------------------------------------------------------
     if include_sourmash:
-        ss_index_s    = _parse_gnu_time_elapsed(scripts / "make_sourmash_sketches.log")
-        ss_pairwise_s = _parse_gnu_time_elapsed(scripts / "compute_sourmash_pairwise.log")
-
         stats["Sourmash FracMinHash"] = {
-            "index_seconds":    ss_index_s,
-            "pairwise_seconds": ss_pairwise_s,
+            "index_seconds":    None,
+            "pairwise_seconds": None,
             "index_bytes":  disk_bytes(data / "gtdb_genomes_reps_r226_sketches.siz.zip"),
             "pairwise_bytes": disk_bytes(data / "gtdb_pairwise_containment.csv"),
-            "index_ram_kb":   _parse_gnu_time_ram_kb(scripts / "make_sourmash_sketches.log"),
-            "pairwise_ram_kb":_parse_gnu_time_ram_kb(scripts / "compute_sourmash_pairwise.log"),
+            "index_ram_kb":   None,
+            "pairwise_ram_kb":  None,
         }
 
     return stats
@@ -381,7 +380,7 @@ def _bar_label(ax, bar, text, fontsize=7):
 # Figure 1 -- Computation time  (log y-scale)
 # ---------------------------------------------------------------------------
 
-_TIME_FLOOR_MIN  = 0.1
+_TIME_FLOOR_H    = 0.001   # ~3.6 seconds — keeps log axis stable near zero
 _DISK_FLOOR_GB   = 0.001   # 1 MB
 
 def _log_center(lo, hi):
@@ -391,7 +390,8 @@ def _log_center(lo, hi):
 
 def plot_time(stats, out_dir, method_order=None):
     """
-    Stacked bar chart (log y-scale) of wall-clock time.
+    Stacked bar chart (log y-scale) of CPU time (hours).
+    CPU seconds = wall_clock_seconds × number of cores used.
     Darker segment = indexing / sketching.
     Lighter segment = pairwise similarity computation.
     """
@@ -402,7 +402,7 @@ def plot_time(stats, out_dir, method_order=None):
     n       = len(methods)
     x       = np.arange(n)
     width   = 0.55
-    floor   = _TIME_FLOOR_MIN
+    floor   = _TIME_FLOOR_H
 
     fig, ax = plt.subplots(figsize=(max(6.5, n * 1.5), 4.5))
 
@@ -413,32 +413,32 @@ def plot_time(stats, out_dir, method_order=None):
         col    = METHOD_COLORS.get(method, {"index": "#888", "pairwise": "#BBB"})
         idx_s  = s["index_seconds"]    or 0.0
         pw_s   = s["pairwise_seconds"] or 0.0
-        idx_m  = idx_s / 60
-        pw_m   = pw_s  / 60
+        idx_h  = idx_s / 3600
+        pw_h   = pw_s  / 3600
 
-        ax.bar(i, idx_m,  width, bottom=floor,
+        ax.bar(i, idx_h,  width, bottom=floor,
                color=col["index"],    edgecolor="white", linewidth=0.5)
-        ax.bar(i, pw_m,   width, bottom=floor + idx_m,
+        ax.bar(i, pw_h,   width, bottom=floor + idx_h,
                color=col["pairwise"], edgecolor="white", linewidth=0.5)
 
-        bar_top = floor + idx_m + pw_m
+        bar_top = floor + idx_h + pw_h
 
-        if idx_m > 0 and (floor + idx_m) / floor > 2.0:
-            cy = _log_center(floor, floor + idx_m)
+        if idx_h > 0 and (floor + idx_h) / floor > 2.0:
+            cy = _log_center(floor, floor + idx_h)
             ax.text(i, cy, _fmt_time(idx_s),
                     ha="center", va="center", fontsize=7,
                     color="white", fontweight="bold")
-        if pw_m > 0 and bar_top / (floor + idx_m) > 2.0:
-            cy = _log_center(floor + idx_m, bar_top)
+        if pw_h > 0 and bar_top / (floor + idx_h) > 2.0:
+            cy = _log_center(floor + idx_h, bar_top)
             ax.text(i, cy, _fmt_time(pw_s),
                     ha="center", va="center", fontsize=7,
                     color="white", fontweight="bold")
 
-        if idx_m > 0 and (floor + idx_m) / floor <= 2.0:
-            ax.text(i, floor + idx_m * 1.05,
+        if idx_h > 0 and (floor + idx_h) / floor <= 2.0:
+            ax.text(i, floor + idx_h * 1.05,
                     f"sketch: {_fmt_time(idx_s)}",
                     ha="center", va="bottom", fontsize=6.5, color="#333")
-        if pw_m > 0 and bar_top / (floor + idx_m) <= 2.0:
+        if pw_h > 0 and bar_top / (floor + idx_h) <= 2.0:
             ax.text(i, bar_top * 1.05,
                     f"pairwise: {_fmt_time(pw_s)}",
                     ha="center", va="bottom", fontsize=6.5, color="#333")
@@ -458,13 +458,13 @@ def plot_time(stats, out_dir, method_order=None):
     ax.set_yscale("log")
     ax.set_xticks(x)
     ax.set_xticklabels(methods, fontsize=8, rotation=15, ha="right")
-    ax.set_ylabel("Wall-clock time (minutes, log scale)", fontsize=9)
+    ax.set_ylabel("CPU time (hours, log scale)", fontsize=9)
     all_tops = [
-        _TIME_FLOOR_MIN + (s.get("index_seconds") or 0) / 60
-                        + (s.get("pairwise_seconds") or 0) / 60
+        _TIME_FLOOR_H + (s.get("index_seconds") or 0) / 3600
+                      + (s.get("pairwise_seconds") or 0) / 3600
         for s in stats.values()
     ]
-    ax.set_ylim(_TIME_FLOOR_MIN / 2, max(all_tops) * 5)
+    ax.set_ylim(_TIME_FLOOR_H / 2, max(all_tops) * 5)
     ax.yaxis.grid(True, which="both", linestyle="--", linewidth=0.4, alpha=0.6)
     ax.set_axisbelow(True)
 
@@ -474,7 +474,7 @@ def plot_time(stats, out_dir, method_order=None):
     ]
     ax.legend(handles=legend_handles, fontsize=8, loc="upper left")
     ax.annotate(
-        f"xN = total time relative to KMC pairwise ({_fmt_time(kmc_pairwise_s)})",
+        f"xN = total CPU time relative to KMC pairwise ({_fmt_time(kmc_pairwise_s)})",
         xy=(0.01, 0.01), xycoords="axes fraction",
         fontsize=7, va="bottom", color="#444",
     )
@@ -605,11 +605,11 @@ def plot_tradeoff(stats, sanity_json, out_dir, method_order=None):
         if r_val is None:
             continue
 
-        total_s = ((s["index_seconds"] or 0) + (s["pairwise_seconds"] or 0)) / 60
+        total_s = ((s["index_seconds"] or 0) + (s["pairwise_seconds"] or 0)) / 3600
         total_b = (s["index_bytes"] + s["pairwise_bytes"]) / 1e9
 
         for ax, xval, xlabel in [
-            (ax1, total_s, "Total wall-clock time (minutes, log scale)"),
+            (ax1, total_s, "Total CPU time (hours, log scale)"),
             (ax2, total_b, "Total disk space (GB, log scale)"),
         ]:
             ax.scatter(xval, r_val, s=120, color=col, zorder=5,
@@ -678,12 +678,14 @@ def main():
             _fmt_bytes(s["index_bytes"]), _fmt_bytes(s["pairwise_bytes"]),
         )
 
-    # Display order: most to least resource-intensive
+    # Display order: KMC first (exact baseline), then sketch methods
+    # left-to-right by increasing resource usage (theory prediction):
+    #   BottomK < AlphaMaxGeomHash < FracMinHash
     method_order = [
         "KMC (exact)",
         "BottomK",
-        "FracMinHash (kmer-sketch)",
         "AlphaMaxGeomHash",
+        "FracMinHash (kmer-sketch)",
     ]
     if args.include_sourmash:
         method_order.append("Sourmash FracMinHash")
