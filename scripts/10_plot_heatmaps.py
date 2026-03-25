@@ -339,6 +339,35 @@ def cluster_by_similarity(sim_matrix: np.ndarray) -> np.ndarray:
 # Error computation
 # ---------------------------------------------------------------------------
 
+def compute_full_l1(
+    kmc_keys:   np.ndarray,
+    kmc_vals:   np.ndarray,
+    meth_keys:  np.ndarray,
+    meth_vals:  np.ndarray,
+    N:          int,
+    min_gt:     float = 1e-6,
+) -> tuple:
+    """
+    Compute total L1 error and pair count over ALL pairs present in both
+    the KMC and method datasets (the full ~1.9 M-pair dataset), using
+    sorted-key intersection via searchsorted.
+
+    Returns (l1_total, n_valid_pairs).
+    """
+    if meth_vals is None or len(meth_keys) == 0:
+        return 0.0, 0
+    pos      = np.searchsorted(kmc_keys, meth_keys)
+    in_range = pos < len(kmc_keys)
+    pos_safe = np.where(in_range, pos, 0)
+    matched  = in_range & (kmc_keys[pos_safe] == meth_keys)
+
+    m_vals = meth_vals[matched]
+    k_vals = kmc_vals[pos_safe[matched]]
+    valid  = (k_vals > min_gt) & np.isfinite(m_vals) & np.isfinite(k_vals)
+    err    = np.abs(m_vals[valid] - k_vals[valid])
+    return float(err.sum()), int(valid.sum())
+
+
 def relative_error_matrix(estimate: np.ndarray, ground_truth: np.ndarray,
                            min_gt: float = 1e-6) -> np.ndarray:
     """
@@ -470,11 +499,10 @@ def plot_heatmaps(kmc_sim: np.ndarray,
     # --- Error panels (one per sketching method) ---
     for col, m in enumerate(methods, start=panel_idx):
         ax  = fig.add_subplot(gs[0, col])
-        l1_str = f"L1 = {m['l1']:.4f}" if m.get("l1") is not None else ""
         img = _draw_heatmap(
             ax, m["err"], cmap_err,
             vmin=0.0, vmax=vmax_err,
-            title=f"{m['label']}\n|error| / KMC ({metric_label})  {l1_str}",
+            title=f"{m['label']}\n|error| / KMC ({metric_label})",
         )
 
     # Shared colorbar for all error panels (spans all error-panel columns)
@@ -548,6 +576,12 @@ def parse_args():
                    help="Similarity metric to visualise")
     p.add_argument("--show-reference", action="store_true",
                    help="Add a leftmost panel showing KMC exact similarity")
+    p.add_argument("--l1-mode",
+                   choices=["full", "subset"],
+                   default="full",
+                   help="L1 error computation scope: 'full' uses all pairs in the "
+                        "pairwise NPZ (~1.9 M for GTDB); 'subset' uses only the "
+                        "N-genome submatrix shown in the heatmap (legacy behaviour).")
     return p.parse_args()
 
 
@@ -555,7 +589,8 @@ def main():
     args    = parse_args()
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
-    metric  = args.metric
+    metric   = args.metric
+    l1_mode  = args.l1_mode
 
     # ------------------------------------------------------------------
     # Load KMC ground truth (defines the reference genome index)
@@ -642,18 +677,31 @@ def main():
         sim = build_submatrix(dataset["keys"], dataset[metric], selected, N)
         err = relative_error_matrix(sim, kmc_sim)
 
-        # Raw L1: sum of |estimate - ground_truth| over valid lower-triangle pairs
-        est_tri   = sim[_ii_tri, _jj_tri]
-        valid_l1  = (~np.isnan(kmc_tri)) & (~np.isnan(est_tri))
-        l1_error  = float(np.sum(np.abs(est_tri[valid_l1] - kmc_tri[valid_l1])))
+        if l1_mode == "full":
+            # Full L1: all pairs present in both KMC and method NPZs
+            l1_total, n_l1_pairs = compute_full_l1(
+                kmc["keys"], kmc[metric],
+                dataset["keys"], dataset[metric],
+                N,
+            )
+        else:
+            # Subset L1: lower-triangle of the N-genome submatrix only
+            est_tri  = sim[_ii_tri, _jj_tri]
+            valid_l1 = (~np.isnan(kmc_tri)) & (~np.isnan(est_tri))
+            l1_total = float(np.sum(np.abs(est_tri[valid_l1] - kmc_tri[valid_l1])))
+            n_l1_pairs = int(valid_l1.sum())
 
-        methods.append({"label": label, "err": err, "l1": l1_error})
+        mean_l1 = l1_total / n_l1_pairs if n_l1_pairs > 0 else 0.0
+        methods.append({"label": label, "err": err,
+                        "l1": l1_total, "n_l1_pairs": n_l1_pairs, "mean_l1": mean_l1})
 
         valid = err[~np.isnan(err)]
         if len(valid):
-            log.info("  %s  relative error: median=%.4f  99pct=%.4f  max=%.4f  L1=%.4f",
+            log.info("  %s  relative error: median=%.4f  99pct=%.4f  max=%.4f  "
+                     "L1=%.4f  mean|err|=%.6f  n_pairs=%d",
                      label.split("\n")[0], np.median(valid),
-                     np.percentile(valid, 99), valid.max(), l1_error)
+                     np.percentile(valid, 99), valid.max(),
+                     l1_total, mean_l1, n_l1_pairs)
 
     if not methods:
         log.error("No method data loaded — provide at least one of "
@@ -697,8 +745,9 @@ def main():
         with open(l1_json_path) as f:
             existing_l1 = json.load(f)
     existing_l1[metric] = {
-        m["label"].split("\n")[0]: m["l1"] for m in methods
+        m["label"].split("\n")[0]: m["mean_l1"] for m in methods
     }
+    existing_l1[f"{metric}__l1_mode"] = l1_mode
     with open(l1_json_path, "w") as f:
         json.dump(existing_l1, f, indent=2)
     log.info("L1 errors written to %s", l1_json_path)

@@ -616,10 +616,10 @@ def plot_tradeoff(stats, sanity_json, out_dir, method_order=None):
 
 def plot_accuracy(l1_json, out_dir, metric, method_order=None):
     """
-    Bar chart of total raw L1 error (sum of |estimate − KMC exact| over the
-    lower-triangle pairs in the N-genome subset) for each sketching method.
+    Bar chart of mean |error| (mean of |estimate − KMC exact| over all pairs)
+    for each sketching method.
 
-    L1 values are read from l1_errors.json written by 10_plot_heatmaps.py.
+    Values are read from l1_errors.json written by 10_plot_heatmaps.py.
     KMC (exact) is the reference and is excluded from this chart.
 
     Parameters
@@ -660,7 +660,7 @@ def plot_accuracy(l1_json, out_dir, metric, method_order=None):
         col  = METHOD_COLORS.get(method, {"index": "#888"})["index"]
         l1   = l1_for_metric[method]
         bar  = ax.bar(i, l1, width, color=col, edgecolor="white", linewidth=0.5)
-        ax.text(i, l1 * 1.02, f"{l1:.2f}",
+        ax.text(i, l1 * 1.02, f"{l1:.6f}",
                 ha="center", va="bottom", fontsize=8, color="#222")
 
     metric_label = {
@@ -670,7 +670,7 @@ def plot_accuracy(l1_json, out_dir, metric, method_order=None):
 
     ax.set_xticks(x)
     ax.set_xticklabels(sketch_methods, fontsize=8, rotation=15, ha="right")
-    ax.set_ylabel(f"Total L1 error  (|estimate − KMC exact|,  {metric_label})", fontsize=9)
+    ax.set_ylabel(f"Mean |error|  (|estimate − KMC exact|,  {metric_label})", fontsize=9)
     ax.set_ylim(0, max(l1_for_metric[m] for m in sketch_methods) * 1.2)
     ax.yaxis.grid(True, linestyle="--", linewidth=0.4, alpha=0.6)
     ax.set_axisbelow(True)
