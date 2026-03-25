@@ -5,7 +5,7 @@
 Compute pairwise Jaccard similarity and containment for candidate GTDB genome
 pairs using AlphaMaxGeomHash sketches.
 
-Only genome pairs that passed the FracMinHash 0.01 max-containment threshold
+Only genome pairs that passed the sourmash 0.001 max-containment threshold
 (listed in --candidates CSV) are evaluated.  Both genomes in a pair must have
 a sketch in --sketch-dir; pairs missing either sketch are skipped automatically.
 This means the same script works whether you sketched 200 genomes (test mode)

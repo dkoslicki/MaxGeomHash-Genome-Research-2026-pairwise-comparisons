@@ -6,8 +6,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 BASE_DIR="/scratch/shared_data/MaxGeomHash_Genome_Research_2026"
 GTDB_DIR="${BASE_DIR}/data/GTDB"
-SKETCH_IN="${GTDB_DIR}/gtdb_genomes_reps_r226_sketches.siz.zip"
-PAIRWISE_OUT="${GTDB_DIR}/gtdb_pairwise_containment.csv"
+SKETCH_IN="${GTDB_DIR}/gtdb_genomes_reps_r226_sketches_scale_100.sig.zip"
+PAIRWISE_OUT="${GTDB_DIR}/gtdb_pairwise_containment_thr0001.csv"
 
 # ---------------------------------------------------------------------------
 # Parameters — adjust as needed
@@ -16,8 +16,10 @@ CORES=500       # physical cores available on the H200 node
 KSIZE=31
 # Only emit pairs whose max-containment is at or above this threshold.
 # At 143k genomes, every pair above 0 would be ~10 billion rows.
-# 0.01 = 1% shared k-mers; tune down if you want more distant relationships.
-THRESHOLD=0.01
+# 0.001 = 0.1% shared k-mers; captures more distant relationships than the
+# previous 0.01 threshold.  Requires scaled=100 sketches (not scaled=1000)
+# to have sufficient resolution at this similarity level.
+THRESHOLD=0.001
 
 # ---------------------------------------------------------------------------
 # Timing + resource tracking

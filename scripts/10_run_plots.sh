@@ -43,7 +43,7 @@ set -euo pipefail
 BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # --------------- Configurable parameters --------------------------------------
-FIGURE_DIR="${BASE}/data/GTDB/figures"
+FIGURE_DIR="${BASE}/data/GTDB/figures_thr0001"
 SUBSET_HEATMAP="${SUBSET_HEATMAP:-0}"      # 1 = also run dense N-genome heatmap
 N_GENOMES="${N_GENOMES:-500}"              # genome count for subset heatmap
 ORDERING="${ORDERING:-spectral}"           # degree | rcm | spectral
@@ -51,11 +51,11 @@ SHOW_REF="${SHOW_REF:-0}"                  # 1 = add KMC reference panel
 INCLUDE_SOURMASH="${INCLUDE_SOURMASH:-0}"  # 1 = add Sourmash FracMinHash
 CONDA_ENV="${CONDA_ENV:-sourmash}"         # conda env that has datashader
 
-KMC_PAIRWISE="${BASE}/data/GTDB/kmc_pairwise"
-AMG_PAIRWISE="${BASE}/data/GTDB/alphamaxgeom_pairwise"
-BK_PAIRWISE="${BASE}/data/GTDB/bottomk_pairwise"
-FMH_KS_PAIRWISE="${BASE}/data/GTDB/fracminhash_pairwise"
-SOURMASH_CSV="${BASE}/data/GTDB/gtdb_pairwise_containment.csv"
+KMC_PAIRWISE="${BASE}/data/GTDB/kmc_pairwise_thr0001"
+AMG_PAIRWISE="${BASE}/data/GTDB/alphamaxgeom_pairwise_thr0001"
+BK_PAIRWISE="${BASE}/data/GTDB/bottomk_pairwise_thr0001"
+FMH_KS_PAIRWISE="${BASE}/data/GTDB/fracminhash_pairwise_thr0001"
+SOURMASH_CSV="${BASE}/data/GTDB/gtdb_pairwise_containment_thr0001.csv"
 SANITY_JSON="${AMG_PAIRWISE}/sanity_check/sanity_check_summary.json"
 # ------------------------------------------------------------------------------
 

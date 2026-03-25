@@ -8,7 +8,7 @@ BASE_DIR="/scratch/shared_data/MaxGeomHash_Genome_Research_2026"
 GTDB_DIR="${BASE_DIR}/data/GTDB"
 GENOME_DIR="${GTDB_DIR}/gtdb_genomes_reps_r226"
 MANIFEST="${GTDB_DIR}/manysketch.csv"
-SKETCH_OUT="${GTDB_DIR}/gtdb_genomes_reps_r226_sketches.siz.zip"
+SKETCH_OUT="${GTDB_DIR}/gtdb_genomes_reps_r226_sketches_scale_100.sig.zip"
 
 # ---------------------------------------------------------------------------
 # Timing: bash updates $SECONDS automatically; reset it to 0 at script start
@@ -60,7 +60,7 @@ fi
 echo "Starting sourmash manysketch (this will take a while) ..."
 /usr/bin/time -v sourmash scripts manysketch "${MANIFEST}" \
     --output "${SKETCH_OUT}" \
-    --param-string "dna,k=31,scaled=1000,noabund" \
+    --param-string "dna,k=31,scaled=100,noabund" \
     --cores 500 \
     --force \
     2> >(tee "${TIME_LOG}" >&2)   # capture time -v stderr AND keep it visible
