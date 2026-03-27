@@ -10,8 +10,8 @@
 #   bash scripts/01_kmc_count.sh            # KMC k-mer counting
 #
 # This script runs (in order):
-#   1. make_sourmash_sketches.sh            — sourmash FracMinHash, scaled=100
-#   2. compute_sourmash_pairwise.sh         — all-vs-all, threshold=0.001 → candidates CSV
+#   1. make_fracminhash_sketches.sh         — kmer-sketch FracMinHash, scale=0.01 (scaled=100)
+#   2. compute_fracminhash_candidates.sh    — all-vs-all, threshold=0.001 → candidates CSV
 #   3. 02_kmc_pairwise.sh                   — KMC exact pairwise on candidates
 #   4. 03_bottomk_sketch.sh                 — BottomK sketches (kmer-sketch)
 #   5. 04_fracminhash_sketch.sh             — FracMinHash sketches (kmer-sketch)
@@ -54,11 +54,15 @@ echo "  Full Pipeline — scaled=100, threshold=0.001"           | tee -a "${LOG
 echo "  Start: $(date)"                                         | tee -a "${LOG}"
 echo "========================================================"  | tee -a "${LOG}"
 
-# Step 1: Sourmash sketching (scaled=100)
-run_step "make_sourmash_sketches" "$BASE/scripts/make_sourmash_sketches.sh"
+# Step 1: FracMinHash sketching via kmer-sketch (scaled=100, scale=0.01)
+# Skips automatically if 04_fracminhash_sketch.sh output already exists.
+run_step "make_fracminhash_sketches" "$BASE/scripts/make_fracminhash_sketches.sh"
 
-# Step 2: Sourmash pairwise (threshold=0.001) → gtdb_pairwise_containment_thr0001.csv
-run_step "compute_sourmash_pairwise" "$BASE/scripts/compute_sourmash_pairwise.sh"
+# Step 2: All-vs-all FracMinHash pairwise (threshold=0.001) → candidates CSV
+# Uses kmer-sketch sketches instead of sourmash, avoiding the sig.zip
+# corruption and poor parallelism issues seen with sourmash manysketch at
+# scaled=100.
+run_step "compute_fracminhash_candidates" "$BASE/scripts/compute_fracminhash_candidates.sh"
 
 # Step 3: KMC exact pairwise on new candidate set
 run_step "02_kmc_pairwise" "$BASE/scripts/02_kmc_pairwise.sh"

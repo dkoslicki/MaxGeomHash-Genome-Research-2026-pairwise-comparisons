@@ -28,11 +28,11 @@ than the sketching methods; a linear axis makes them invisible slivers.
 Timing sources
 --------------
   AMG sketch    : data/GTDB/alphamaxgeom_sketches/sketch_run_stats.json
-  AMG pairwise  : data/GTDB/alphamaxgeom_pairwise/pairwise_run_stats.json
+  AMG pairwise  : data/GTDB/alphamaxgeom_pairwise_thr0001/pairwise_run_stats.json
   BK sketch     : data/GTDB/bottomk_sketches/sketch_run_stats.json
-  BK pairwise   : data/GTDB/bottomk_pairwise/pairwise_run_stats.json
+  BK pairwise   : data/GTDB/bottomk_pairwise_thr0001/pairwise_run_stats.json
   FMH_ks sketch : data/GTDB/fracminhash_sketches/sketch_run_stats.json
-  FMH_ks pairwise: data/GTDB/fracminhash_pairwise/pairwise_run_stats.json
+  FMH_ks pairwise: data/GTDB/fracminhash_pairwise_thr0001/pairwise_run_stats.json
   Sourmash sketch  : scripts/make_sourmash_sketches.log   (GNU time block)
   Sourmash pairwise: scripts/compute_sourmash_pairwise.log (GNU time block)
   KMC pairwise  : scripts/02_kmc_pairwise.log             (Run Summary block)
@@ -125,6 +125,45 @@ def _parse_gnu_time_elapsed(log_path):
                     return int(a) * 60 + float(b)
                 else:
                     return int(a) * 3600 + int(b) * 60 + float(c)
+    return None
+
+
+def _parse_pipeline_step_elapsed(log_path, step_label):
+    """
+    Extract elapsed wall-clock seconds for a named step from a master pipeline
+    log that uses the convention:
+        === START <step_label> <date> ===
+        ...
+        === END   <step_label> <date> ===
+
+    Parses the date strings with dateutil and returns the difference in seconds,
+    or None if the markers are not found.
+    """
+    from dateutil import parser as _duparser
+    if not Path(log_path).exists():
+        return None
+    start_pat = re.compile(rf"=== START\s+{re.escape(step_label)}\s+(.*?)\s*===")
+    end_pat   = re.compile(rf"=== END\s+{re.escape(step_label)}\s+(.*?)\s*===")
+    t_start = t_end = None
+    with open(log_path) as f:
+        for line in f:
+            if t_start is None:
+                m = start_pat.search(line)
+                if m:
+                    try:
+                        t_start = _duparser.parse(m.group(1))
+                    except Exception:
+                        pass
+            else:
+                m = end_pat.search(line)
+                if m:
+                    try:
+                        t_end = _duparser.parse(m.group(1))
+                    except Exception:
+                        pass
+                    break
+    if t_start is not None and t_end is not None:
+        return (t_end - t_start).total_seconds()
     return None
 
 
@@ -248,13 +287,22 @@ def collect_stats(base, include_sourmash=False):
     #   counting  : 96 parallel jobs × 4 threads/job = 384 cores
     #   pairwise  : 192 worker processes (--cores 192 in 02_kmc_pairwise.sh)
     # The KMC counting log crashed before completion, so index time is None.
+    #
+    # Pairwise timing: prefer the master pipeline log (full_pipeline.log)
+    # because 02_kmc_pairwise.log may contain a stale run from a previous
+    # threshold setting.  Fall back to 02_kmc_pairwise.log if the pipeline
+    # log does not have a matching START/END block.
     # ------------------------------------------------------------------
     _KMC_COUNT_CORES    = 384   # 96 parallel_jobs × 4 threads each
     _KMC_PAIRWISE_CORES = 192   # --cores 192 in 02_kmc_pairwise.sh
 
     kmc_index_wall_s    = _parse_gnu_time_elapsed(scripts / "01_kmc_count.log")
-    kmc_pairwise_wall_s = _parse_run_summary_hms(scripts / "02_kmc_pairwise.log",
-                                                  "Wall-clock time")
+    kmc_pairwise_wall_s = _parse_pipeline_step_elapsed(
+        scripts / "full_pipeline.log", "02_kmc_pairwise"
+    )
+    if kmc_pairwise_wall_s is None:
+        kmc_pairwise_wall_s = _parse_run_summary_hms(scripts / "02_kmc_pairwise.log",
+                                                      "Wall-clock time")
     if kmc_pairwise_wall_s is None:
         kmc_pairwise_wall_s = _parse_gnu_time_elapsed(scripts / "02_kmc_pairwise.log")
 
@@ -267,7 +315,7 @@ def collect_stats(base, include_sourmash=False):
         "index_seconds":    kmc_index_s,
         "pairwise_seconds": kmc_pairwise_s,
         "index_bytes":      disk_bytes(data / "kmc_dbs"),
-        "pairwise_bytes":   disk_bytes(data / "kmc_pairwise"),
+        "pairwise_bytes":   disk_bytes(data / "kmc_pairwise_thr0001"),
         "index_ram_kb":     None,
         "pairwise_ram_kb":  None,
     }
@@ -277,8 +325,8 @@ def collect_stats(base, include_sourmash=False):
     # CPU seconds = wall_clock_seconds × parallel_jobs (sketch)
     #             = wall_clock_seconds × cores          (pairwise)
     # ------------------------------------------------------------------
-    bk_sketch_json   = data / "bottomk_sketches"  / "sketch_run_stats.json"
-    bk_pairwise_json = data / "bottomk_pairwise"  / "pairwise_run_stats.json"
+    bk_sketch_json   = data / "bottomk_sketches"       / "sketch_run_stats.json"
+    bk_pairwise_json = data / "bottomk_pairwise_thr0001" / "pairwise_run_stats.json"
 
     stats["MinHash"] = {
         "index_seconds":    _json_cpu_seconds(bk_sketch_json,
@@ -286,7 +334,7 @@ def collect_stats(base, include_sourmash=False):
         "pairwise_seconds": _json_cpu_seconds(bk_pairwise_json,
                                               "wall_clock_seconds", "cores"),
         "index_bytes":      disk_bytes(data / "bottomk_sketches"),
-        "pairwise_bytes":   disk_bytes(data / "bottomk_pairwise"),
+        "pairwise_bytes":   disk_bytes(data / "bottomk_pairwise_thr0001"),
         "index_ram_kb":     None,
         "pairwise_ram_kb":  None,
     }
@@ -294,8 +342,8 @@ def collect_stats(base, include_sourmash=False):
     # ------------------------------------------------------------------
     # AlphaMaxGeomHash
     # ------------------------------------------------------------------
-    amg_sketch_json   = data / "alphamaxgeom_sketches"  / "sketch_run_stats.json"
-    amg_pairwise_json = data / "alphamaxgeom_pairwise"  / "pairwise_run_stats.json"
+    amg_sketch_json   = data / "alphamaxgeom_sketches"          / "sketch_run_stats.json"
+    amg_pairwise_json = data / "alphamaxgeom_pairwise_thr0001"  / "pairwise_run_stats.json"
 
     stats["AlphaMaxGeomHash"] = {
         "index_seconds":    _json_cpu_seconds(amg_sketch_json,
@@ -303,7 +351,7 @@ def collect_stats(base, include_sourmash=False):
         "pairwise_seconds": _json_cpu_seconds(amg_pairwise_json,
                                               "wall_clock_seconds", "cores"),
         "index_bytes":      disk_bytes(data / "alphamaxgeom_sketches"),
-        "pairwise_bytes":   disk_bytes(data / "alphamaxgeom_pairwise"),
+        "pairwise_bytes":   disk_bytes(data / "alphamaxgeom_pairwise_thr0001"),
         "index_ram_kb":     None,
         "pairwise_ram_kb":  None,
     }
@@ -311,8 +359,8 @@ def collect_stats(base, include_sourmash=False):
     # ------------------------------------------------------------------
     # FracMinHash (kmer-sketch binary)
     # ------------------------------------------------------------------
-    fmh_ks_sketch_json   = data / "fracminhash_sketches" / "sketch_run_stats.json"
-    fmh_ks_pairwise_json = data / "fracminhash_pairwise" / "pairwise_run_stats.json"
+    fmh_ks_sketch_json   = data / "fracminhash_sketches"        / "sketch_run_stats.json"
+    fmh_ks_pairwise_json = data / "fracminhash_pairwise_thr0001" / "pairwise_run_stats.json"
 
     stats["FracMinHash"] = {
         "index_seconds":    _json_cpu_seconds(fmh_ks_sketch_json,
@@ -320,7 +368,7 @@ def collect_stats(base, include_sourmash=False):
         "pairwise_seconds": _json_cpu_seconds(fmh_ks_pairwise_json,
                                               "wall_clock_seconds", "cores"),
         "index_bytes":      disk_bytes(data / "fracminhash_sketches"),
-        "pairwise_bytes":   disk_bytes(data / "fracminhash_pairwise"),
+        "pairwise_bytes":   disk_bytes(data / "fracminhash_pairwise_thr0001"),
         "index_ram_kb":     None,
         "pairwise_ram_kb":  None,
     }
@@ -431,7 +479,7 @@ def plot_time(stats, out_dir, method_order=None):
         if pw_s > 0:
             ratio = pw_s / kmc_pairwise_s
             ax.text(i, bar_top * 1.6,
-                    f"x{ratio:.2f}",
+                    f"x{ratio:.3f}",
                     ha="center", va="bottom", fontsize=9, fontweight="bold")
 
     ax.set_yscale("log")

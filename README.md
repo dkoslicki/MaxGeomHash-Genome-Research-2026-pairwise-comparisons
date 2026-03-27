@@ -18,29 +18,39 @@ exact k-mer counting (KMC) across all 143,614 GTDB r226 representative genomes.
 ## Pipeline overview
 
 ```
-00_decompress_genomes.sh  ← ONE-TIME SETUP: decompress all .fna.gz → flat .fna dir
-                            also writes manysketch_uncompressed.csv
+00_decompress_genomes.sh       ← ONE-TIME SETUP: decompress all .fna.gz → flat .fna dir
+                                  also writes manysketch_uncompressed.csv
 
-01_kmc_count.sh           ← KMC k-mer counting (ground truth)
-02_kmc_pairwise.sh        ← KMC exact pairwise similarity
+01_kmc_count.sh                ← KMC k-mer counting (ground truth)
 
-03_bottomk_sketch.sh      ← BottomK sketching        (reads uncompressed .fna)
-04_fracminhash_sketch.sh  ← FracMinHash sketching     (reads uncompressed .fna)
-05_alphamaxgeom_sketch.sh ← AlphaMaxGeomHash sketching(reads uncompressed .fna)
+make_fracminhash_sketches.sh   ← FracMinHash sketching for candidate generation
+compute_fracminhash_candidates.sh ← all-vs-all; writes gtdb_pairwise_containment_thr0001.csv
+02_kmc_pairwise.sh             ← KMC exact pairwise on candidates → kmc_pairwise_thr0001/
 
-06_bottomk_pairwise.sh    ← BottomK pairwise (calls 06_bottomk_pairwise.py)
-07_fracminhash_pairwise.sh← FracMinHash pairwise (calls 07_fracminhash_pairwise.py)
-08_alphamaxgeom_pairwise.sh← AlphaMaxGeomHash pairwise (calls 08_alphamaxgeom_pairwise.py)
+03_bottomk_sketch.sh           ← BottomK sketching        (reads uncompressed .fna)
+04_fracminhash_sketch.sh       ← FracMinHash sketching     (reads uncompressed .fna)
+05_alphamaxgeom_sketch.sh      ← AlphaMaxGeomHash sketching(reads uncompressed .fna)
 
-09_sanity_check.py        ← Compare all methods vs KMC; produce accuracy stats
-10_run_plots.sh           ← Generate all publication figures
-  └── 10_plot_heatmaps.py ← Error heatmaps (relative error vs KMC)
-  └── 10_plot_resources.py← Time + disk bar charts + accuracy vs. resources scatter
+06_bottomk_pairwise.sh         ← BottomK pairwise on candidates
+07_fracminhash_pairwise.sh     ← FracMinHash pairwise on candidates
+08_alphamaxgeom_pairwise.sh    ← AlphaMaxGeomHash pairwise on candidates
+
+09_sanity_check.py             ← Compare all methods vs KMC; produce accuracy stats
+10_run_plots.sh                ← Generate all publication figures
+  └── 11_plot_heatmaps_full.py ← Full-dataset Datashader heatmaps (all ~143k genomes)
+  └── 10_plot_heatmaps.py      ← Dense subset heatmaps (SUBSET_HEATMAP=1)
+  └── 10_plot_resources.py     ← Time + disk bar charts + accuracy vs. resources scatter
 ```
 
-Steps 01–02 (KMC) are prerequisites for accuracy comparisons and have already
-been run.  **Step 00 must be run once** before any sketch script.
-Steps 03–10 can then be run independently for each method.
+Steps 00–02 are prerequisites for accuracy comparisons and have already been run.
+**The recommended way to (re-)run everything from step 2 onward** is:
+
+```bash
+bash scripts/run_sketch_and_pairwise_plus_plot.sh
+# Logs → scripts/full_pipeline.log
+```
+
+Steps 03–10 can also be run independently per method.
 
 ---
 
@@ -54,8 +64,6 @@ cd scripts/kmer-sketch && make && cd ../..
 pip install -r scripts/requirements.txt
 
 # ONE-TIME: decompress all 143,614 genomes to a flat .fna directory.
-# This eliminates per-job gunzip overhead in the sketch scripts,
-# allowing the sketch binary to read files directly and fully saturate CPUs.
 # Takes ~10-20 minutes; safe to re-run after partial failures (skips existing).
 bash scripts/00_decompress_genomes.sh
 ```
@@ -79,9 +87,9 @@ All sketch scripts (03, 04, 05) read from this manifest automatically.
 TEST_N=200 bash scripts/03_bottomk_sketch.sh
 bash scripts/06_bottomk_pairwise.sh
 python3 scripts/09_sanity_check.py \
-    --bottomk-pairwise data/GTDB/bottomk_pairwise \
-    --kmc-pairwise     data/GTDB/kmc_pairwise \
-    --output           data/GTDB/bottomk_pairwise/sanity_check
+    --bottomk-pairwise data/GTDB/bottomk_pairwise_thr0001 \
+    --kmc-pairwise     data/GTDB/kmc_pairwise_thr0001 \
+    --output           data/GTDB/bottomk_pairwise_thr0001/sanity_check
 
 # FracMinHash
 TEST_N=200 bash scripts/04_fracminhash_sketch.sh
@@ -123,11 +131,11 @@ nohup bash /tmp/run_pipeline.sh \
 
 ```bash
 python3 scripts/09_sanity_check.py \
-    --amg-pairwise         data/GTDB/alphamaxgeom_pairwise \
-    --bottomk-pairwise     data/GTDB/bottomk_pairwise \
-    --fracminhash-pairwise data/GTDB/fracminhash_pairwise \
-    --kmc-pairwise         data/GTDB/kmc_pairwise \
-    --output               data/GTDB/sanity_check
+    --amg-pairwise         data/GTDB/alphamaxgeom_pairwise_thr0001 \
+    --bottomk-pairwise     data/GTDB/bottomk_pairwise_thr0001 \
+    --fracminhash-pairwise data/GTDB/fracminhash_pairwise_thr0001 \
+    --kmc-pairwise         data/GTDB/kmc_pairwise_thr0001 \
+    --output               data/GTDB/alphamaxgeom_pairwise_thr0001/sanity_check
 ```
 
 To also include the Sourmash FracMinHash baseline:
@@ -135,7 +143,7 @@ To also include the Sourmash FracMinHash baseline:
 ```bash
 python3 scripts/09_sanity_check.py ... \
     --include-sourmash \
-    --sourmash-csv data/GTDB/gtdb_pairwise_containment.csv
+    --sourmash-csv data/GTDB/gtdb_pairwise_containment_thr0001.csv
 ```
 
 ---
@@ -146,11 +154,13 @@ python3 scripts/09_sanity_check.py ... \
 bash scripts/10_run_plots.sh
 ```
 
-This produces all figures in `data/GTDB/figures/`.  Environment variables:
+This produces all figures in `data/GTDB/figures_thr0001/`.  Environment variables:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `N_GENOMES` | 500 | Number of genomes in heatmap panels |
+| `SUBSET_HEATMAP` | 0 | Set to 1 to also produce dense N-genome subset heatmaps |
+| `N_GENOMES` | 500 | Number of genomes in subset heatmap panels |
+| `ORDERING` | spectral | Genome ordering for full heatmaps: `degree`, `rcm`, or `spectral` |
 | `SHOW_REF` | 0 | Set to 1 to add a KMC reference panel to heatmaps |
 | `INCLUDE_SOURMASH` | 0 | Set to 1 to add Sourmash FracMinHash to figures |
 
@@ -172,14 +182,16 @@ exist, so it works correctly even if only some methods have been run.
 | Script | Input | Output | When to run |
 |--------|-------|--------|-------------|
 | `01_kmc_count.sh` | GTDB genome FASTA files | `data/GTDB/kmc_dbs/` | Once; already done |
-| `02_kmc_pairwise.sh` | kmc_dbs | `data/GTDB/kmc_pairwise/` | Once; already done |
+| `make_fracminhash_sketches.sh` | `manysketch_uncompressed.csv` | `data/GTDB/fracminhash_sketches/` | Once (skips if done) |
+| `compute_fracminhash_candidates.sh` | fracminhash_sketches | `data/GTDB/gtdb_pairwise_containment_thr0001.csv` | Once; already done |
+| `02_kmc_pairwise.sh` | kmc_dbs + candidates CSV | `data/GTDB/kmc_pairwise_thr0001/` | Once; already done |
 
 ### BottomK (kmer-sketch)
 
 | Script | Input | Output | When to run |
 |--------|-------|--------|-------------|
 | `03_bottomk_sketch.sh` | `gtdb_genomes_reps_r226_uncompressed/*.fna` | `data/GTDB/bottomk_sketches/` | After `00_decompress_genomes.sh` |
-| `06_bottomk_pairwise.py/.sh` | bottomk_sketches + candidates CSV | `data/GTDB/bottomk_pairwise/` | After `03_bottomk_sketch.sh` |
+| `06_bottomk_pairwise.py/.sh` | bottomk_sketches + candidates CSV | `data/GTDB/bottomk_pairwise_thr0001/` | After `03_bottomk_sketch.sh` |
 
 Parameters: `--algo bottomk --k 1000 --kmer 31 --canonical --seed 42`
 
@@ -188,7 +200,7 @@ Parameters: `--algo bottomk --k 1000 --kmer 31 --canonical --seed 42`
 | Script | Input | Output | When to run |
 |--------|-------|--------|-------------|
 | `04_fracminhash_sketch.sh` | `gtdb_genomes_reps_r226_uncompressed/*.fna` | `data/GTDB/fracminhash_sketches/` | After `00_decompress_genomes.sh` |
-| `07_fracminhash_pairwise.py/.sh` | fracminhash_sketches + candidates CSV | `data/GTDB/fracminhash_pairwise/` | After `04_fracminhash_sketch.sh` |
+| `07_fracminhash_pairwise.py/.sh` | fracminhash_sketches + candidates CSV | `data/GTDB/fracminhash_pairwise_thr0001/` | After `04_fracminhash_sketch.sh` |
 
 Parameters: `--algo fracminhash --scale 0.01 --kmer 31 --canonical --seed 42`
 
@@ -197,7 +209,7 @@ Parameters: `--algo fracminhash --scale 0.01 --kmer 31 --canonical --seed 42`
 | Script | Input | Output | When to run |
 |--------|-------|--------|-------------|
 | `05_alphamaxgeom_sketch.sh` | `gtdb_genomes_reps_r226_uncompressed/*.fna` | `data/GTDB/alphamaxgeom_sketches/` | After `00_decompress_genomes.sh` |
-| `08_alphamaxgeom_pairwise.py/.sh` | alphamaxgeom_sketches + candidates CSV | `data/GTDB/alphamaxgeom_pairwise/` | After `05_alphamaxgeom_sketch.sh` |
+| `08_alphamaxgeom_pairwise.py/.sh` | alphamaxgeom_sketches + candidates CSV | `data/GTDB/alphamaxgeom_pairwise_thr0001/` | After `05_alphamaxgeom_sketch.sh` |
 
 Parameters: `--algo alphamaxgeom --w 64 --alpha 0.45 --kmer 31 --canonical --seed 42`
 
@@ -206,9 +218,10 @@ Parameters: `--algo alphamaxgeom --w 64 --alpha 0.45 --kmer 31 --canonical --see
 | Script | Input | Output | When to run |
 |--------|-------|--------|-------------|
 | `09_sanity_check.py` | Any combination of pairwise dirs + KMC | `sanity_check_summary.json` + scatter PNGs | After pairwise step(s) |
-| `10_plot_heatmaps.py` | Pairwise dirs + KMC pairwise | Heatmap PDF/PNG | After `09_sanity_check.py` |
+| `10_plot_heatmaps.py` | Pairwise dirs + KMC pairwise | Heatmap PDF/PNG (subset) | After `09_sanity_check.py` |
+| `11_plot_heatmaps_full.py` | Pairwise dirs + KMC pairwise | Full-dataset Datashader heatmaps | After pairwise step(s) |
 | `10_plot_resources.py` | Project root (reads JSON stats + logs) | Resource bar chart PDF/PNG | After pairwise step(s) |
-| `10_run_plots.sh` | — | All figures in `data/GTDB/figures/` | Wrapper for both `10_plot_*.py` |
+| `10_run_plots.sh` | — | All figures in `data/GTDB/figures_thr0001/` | Wrapper for all `10_plot_*.py` + `11_plot_heatmaps_full.py` |
 
 ---
 
@@ -221,24 +234,22 @@ data/GTDB/
 │                                            created by 00_decompress_genomes.sh
 ├── manysketch_uncompressed.csv           ← manifest pointing to .fna files
 ├── kmc_dbs/                              ← KMC k-mer databases (3.9 TB)
-├── kmc_pairwise/                         ← KMC exact pairwise (41 MB NPZ)
+├── kmc_pairwise_thr0001/                 ← KMC exact pairwise (NPZ)
+├── gtdb_pairwise_containment_thr0001.csv ← FracMinHash candidate pairs (threshold=0.001)
 ├── bottomk_sketches/                     ← BottomK sketches + sketch_run_stats.json
-├── bottomk_pairwise/                     ← BottomK pairwise NPZ + run stats
+├── bottomk_pairwise_thr0001/             ← BottomK pairwise NPZ + run stats
 │   └── sanity_check/
 ├── fracminhash_sketches/                 ← FracMinHash (kmer-sketch) sketches
-├── fracminhash_pairwise/                 ← FracMinHash pairwise NPZ + run stats
+├── fracminhash_pairwise_thr0001/         ← FracMinHash pairwise NPZ + run stats
 ├── alphamaxgeom_sketches/                ← AlphaMaxGeomHash sketches
-├── alphamaxgeom_pairwise/                ← AlphaMaxGeomHash pairwise NPZ + run stats
+├── alphamaxgeom_pairwise_thr0001/        ← AlphaMaxGeomHash pairwise NPZ + run stats
 │   └── sanity_check/
-├── gtdb_pairwise_containment.csv         ← Sourmash FracMinHash pairwise (candidate pairs)
-├── sanity_check/                         ← combined sanity check (all methods)
-└── figures/                              ← all publication figures (PDF + PNG)
-    ├── heatmap_jaccard_relative_error.{pdf,png}
-    ├── heatmap_max_containment_relative_error.{pdf,png}
+└── figures_thr0001/                      ← all publication figures (PDF + PNG)
+    ├── heatmap_jaccard_relative_error_full_{ordering}.{pdf,png}
+    ├── heatmap_max_containment_relative_error_full_{ordering}.{pdf,png}
     ├── resources_time.{pdf,png}
     ├── resources_disk.{pdf,png}
-    ├── resources_tradeoff.{pdf,png}
-    └── resource_summary.json
+    └── resources_tradeoff.{pdf,png}
 ```
 
 ---
@@ -265,10 +276,13 @@ Use the **active scripts** (00–10 in `scripts/`) for all current and future wo
 ## Notes on the Sourmash FracMinHash baseline
 
 The Sourmash FracMinHash pipeline was run as an independent baseline before
-the kmer-sketch implementation.  Its pairwise CSV
-(`gtdb_pairwise_containment.csv`) is still used as the **candidate pair
-filter** for all kmer-sketch pairwise scripts — only pairs with
-`max_containment > 0.01` in the Sourmash run are evaluated.
+the kmer-sketch implementation.  Its pairwise CSV is preserved for reference.
+
+Candidate pair generation now uses `compute_fracminhash_candidates.py` (the
+kmer-sketch FracMinHash all-vs-all), which replaced sourmash manysketch after
+sourmash was found to corrupt `.sig.zip` files at scaled=100.  The candidates
+CSV (`gtdb_pairwise_containment_thr0001.csv`, threshold=0.001) is used as the
+input filter for all kmer-sketch pairwise scripts.
 
 The Sourmash method is **excluded from default figures**.  To include it,
 pass `--include-sourmash` to `09_sanity_check.py`, `10_plot_heatmaps.py`,

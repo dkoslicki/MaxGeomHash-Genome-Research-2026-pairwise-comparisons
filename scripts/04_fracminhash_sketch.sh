@@ -5,12 +5,12 @@
 # Create FracMinHash sketches of all GTDB representative genomes using the
 # kmer-sketch binary.
 #
-# Algorithm:  fracminhash  (--scale 0.001, equivalent to sourmash scaled=1000)
+# Algorithm:  fracminhash  (--scale 0.01, equivalent to sourmash scaled=100)
 # K-mer size: 31, canonical k-mers, seed=42
 #
 # Note on scale vs scaled:
 #   The kmer-sketch binary uses --scale S where S = 1 / scaled.
-#   scale=0.001 matches sourmash's default scaled=1000 exactly.
+#   scale=0.01 (scaled=100) is read from config.json (fracminhash.scale).
 #
 # Reads from the pre-decompressed flat FASTA directory created by
 # 00_decompress_genomes.sh.  Run that script once before running this one.
