@@ -42,8 +42,8 @@ compute_fracminhash_candidates.sh ← all-vs-all; writes gtdb_pairwise_containme
   └── 10_plot_resources.py     ← Time + disk bar charts + accuracy vs. resources scatter
 ```
 
-Steps 00–02 are prerequisites for accuracy comparisons and have already been run.
-**The recommended way to (re-)run everything from step 2 onward** is:
+Steps 00–02 are prerequisites for accuracy comparisons.
+**The recommended way to (re-)run everything from step 2 onward (if on the cbdmk02 GPU server)** is:
 
 ```bash
 bash scripts/run_sketch_and_pairwise_plus_plot.sh
@@ -177,14 +177,14 @@ exist, so it works correctly even if only some methods have been run.
 |--------|-------|--------|-------------|
 | `00_decompress_genomes.sh` | `gtdb_genomes_reps_r226/*.fna.gz` | `gtdb_genomes_reps_r226_uncompressed/*.fna` + `manysketch_uncompressed.csv` | **Once**, before any sketch script |
 
-### KMC (ground truth) — already run
+### KMC (ground truth) (already run on cbdmk02; takes a long time)
 
 | Script | Input | Output | When to run |
 |--------|-------|--------|-------------|
-| `01_kmc_count.sh` | GTDB genome FASTA files | `data/GTDB/kmc_dbs/` | Once; already done |
+| `01_kmc_count.sh` | GTDB genome FASTA files | `data/GTDB/kmc_dbs/` | Once; already done on cbdmk02 as it takes a while |
 | `make_fracminhash_sketches.sh` | `manysketch_uncompressed.csv` | `data/GTDB/fracminhash_sketches/` | Once (skips if done) |
-| `compute_fracminhash_candidates.sh` | fracminhash_sketches | `data/GTDB/gtdb_pairwise_containment_thr0001.csv` | Once; already done |
-| `02_kmc_pairwise.sh` | kmc_dbs + candidates CSV | `data/GTDB/kmc_pairwise_thr0001/` | Once; already done |
+| `compute_fracminhash_candidates.sh` | fracminhash_sketches | `data/GTDB/gtdb_pairwise_containment_thr0001.csv` | Once|
+| `02_kmc_pairwise.sh` | kmc_dbs + candidates CSV | `data/GTDB/kmc_pairwise_thr0001/` | Once|
 
 ### BottomK (kmer-sketch)
 
