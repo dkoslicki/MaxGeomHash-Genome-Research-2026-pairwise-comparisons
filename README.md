@@ -78,6 +78,19 @@ All sketch scripts (03, 04, 05) read from this manifest automatically.
 
 ---
 
+## Smoke test (end-to-end validation, ~1 min)
+
+```bash
+bash smoke_test/run_smoke_test.sh
+```
+
+Runs the full pipeline on 100 curated genomes (selected to guarantee ~900
+real candidate pairs) and reports accuracy vs. KMC exact.  Output is
+written to `smoke_test/data/` (gitignored).  See `smoke_test/README.md`
+for expected values and output layout.
+
+---
+
 ## Running a new method from scratch
 
 ### Test mode (first 200 genomes)

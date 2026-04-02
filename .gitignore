@@ -1,0 +1,43 @@
+# =============================================================================
+# .gitignore — MaxGeomHash Genome Research 2026
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Data directory — never committed (100s of GB to TBs)
+# ---------------------------------------------------------------------------
+data/
+
+# ---------------------------------------------------------------------------
+# Run logs — captured in full_pipeline.log when using the master script
+# ---------------------------------------------------------------------------
+scripts/*.log
+deprecated/scripts/logs/
+
+# ---------------------------------------------------------------------------
+# Third-party source trees and compiled binaries
+# These are build artefacts checked into the working directory but not the repo.
+# Re-build: cd scripts/kmer-sketch && make
+#           cd scripts/kmc_api_src  && make
+# ---------------------------------------------------------------------------
+scripts/kmer-sketch/
+scripts/kmc_api_src/
+scripts/kmc_db_info
+
+# ---------------------------------------------------------------------------
+# Smoke-test output (generated at run time; see smoke_test/run_smoke_test.sh)
+# ---------------------------------------------------------------------------
+smoke_test/data/
+smoke_test/__pycache__/
+
+# ---------------------------------------------------------------------------
+# Python caches and editor artefacts
+# ---------------------------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------------
+# Claude Code memory (local session state; not part of the codebase)
+# ---------------------------------------------------------------------------
+memory/

@@ -3,7 +3,8 @@
 # 08_alphamaxgeom_pairwise.sh
 #
 # Wrapper: compute AlphaMaxGeomHash pairwise similarities for all genome pairs
-# that passed the sourmash 0.001 threshold (from gtdb_pairwise_containment_thr0001.csv).
+# that passed the FracMinHash all-vs-all candidate filter (max_containment ≥ 0.001,
+# from gtdb_pairwise_containment_thr0001.csv; see compute_fracminhash_candidates.sh).
 #
 # Only pairs where both genomes have been sketched are evaluated.
 # Run 05_alphamaxgeom_sketch.sh first (optionally with TEST_N to sketch a

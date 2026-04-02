@@ -35,8 +35,8 @@ Timing sources
   FMH_ks pairwise: data/GTDB/fracminhash_pairwise_thr0001/pairwise_run_stats.json
   Sourmash sketch  : scripts/make_sourmash_sketches.log   (GNU time block)
   Sourmash pairwise: scripts/compute_sourmash_pairwise.log (GNU time block)
-  KMC pairwise  : scripts/02_kmc_pairwise.log             (Run Summary block)
-  KMC counting  : scripts/01_kmc_count.log                (GNU time block)
+  KMC pairwise  : scripts/full_pipeline.log  (=== START/END 02_kmc_pairwise ===)
+  KMC counting  : scripts/01_kmc_count.log  (GNU time block)
 
 Disk-space sources
 ------------------
