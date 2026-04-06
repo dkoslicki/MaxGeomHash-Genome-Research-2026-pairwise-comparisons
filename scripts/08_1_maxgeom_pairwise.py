@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-06_bottomk_pairwise.py
-=======================
+08_1_maxgeom_pairwise.py
+============================
 Compute pairwise Jaccard similarity and containment for candidate GTDB genome
-pairs using BottomK sketches (kmer-sketch binary, --algo bottomk).
+pairs using MaxGeomHash sketches.
 
 Only genome pairs that passed the sourmash 0.001 max-containment threshold
 (listed in --candidates CSV) are evaluated.  Both genomes in a pair must have
@@ -39,11 +39,11 @@ Outputs (in --output directory):
   pairwise_run_stats.json — timing, counts, disk usage for later comparison
 
 Usage:
-  # Test run (after TEST_N=200 bash 03_bottomk_sketch.sh):
-  python3 06_bottomk_pairwise.py \\
-      --sketch-dir /scratch/.../bottomk_sketches \\
+  # Test run (after TEST_N=200 bash 05_1_maxgeom_sketch.sh):
+  python3 08_1_maxgeom_pairwise.py \\
+      --sketch-dir /scratch/.../maxgeom_sketches \\
       --candidates /scratch/.../gtdb_pairwise_containment.csv \\
-      --output     /scratch/.../bottomk_pairwise \\
+      --output     /scratch/.../maxgeom_pairwise \\
       --cores      192
 
   # Full run — identical command; the script automatically uses all available
@@ -79,8 +79,6 @@ log = logging.getLogger(__name__)
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _FILTER_BIN  = _SCRIPT_DIR / "kmer-sketch" / "bin" / "filter"
 
-_SKETCH_EXT = ".bottomk.sketch"
-
 
 # ---------------------------------------------------------------------------
 # Candidate pairs
@@ -89,8 +87,8 @@ _SKETCH_EXT = ".bottomk.sketch"
 def discover_sketches(sketch_dir: str) -> set:
     """Return the set of genome IDs that have a sketch file in sketch_dir."""
     return {
-        p.name.replace(_SKETCH_EXT, "")
-        for p in Path(sketch_dir).glob(f"*{_SKETCH_EXT}")
+        p.name.replace(".maxgeom.sketch", "")
+        for p in Path(sketch_dir).glob("*.maxgeom.sketch")
     }
 
 
@@ -134,36 +132,39 @@ def _run_filter_for_query(args: tuple):
         (query_id, neighbor_results) or None on fatal error.
 
         neighbor_results: dict[neighbor_id -> dict with keys:
-            'jaccard'      — Jaccard estimate (float)
-            'containment'  — containment of neighbor in query (float)
-            'size_query'   — #elements in query sketch (int)
-            'size_ref'     — #elements in neighbor sketch (int)
+            'jaccard'                   — Jaccard estimate (float)
+            'containment_ref_in_query'  — containment of neighbor in query (float)
+            'size_query'                — #elements in query sketch (int)
+            'size_ref'                  — #elements in neighbor sketch (int)
         ]
     """
     query_id, neighbor_ids, sketch_dir, filter_bin, tmp_root = args
 
-    query_sketch = os.path.join(sketch_dir, f"{query_id}{_SKETCH_EXT}")
+    query_sketch = os.path.join(sketch_dir, f"{query_id}.maxgeom.sketch")
     if not os.path.exists(query_sketch):
         return None
 
     # Validate which neighbors actually have sketch files
     ref_paths = {
-        nid: os.path.join(sketch_dir, f"{nid}{_SKETCH_EXT}")
+        nid: os.path.join(sketch_dir, f"{nid}.maxgeom.sketch")
         for nid in neighbor_ids
-        if os.path.exists(os.path.join(sketch_dir, f"{nid}{_SKETCH_EXT}"))
+        if os.path.exists(os.path.join(sketch_dir, f"{nid}.maxgeom.sketch"))
     }
     if not ref_paths:
         return None
 
-    # Unique temp directory per call
-    worker_tmp = tempfile.mkdtemp(prefix=f"bk_{query_id[:12]}_", dir=tmp_root)
+    # Unique temp directory per call (PID + query name prefix to avoid collisions)
+    worker_tmp = tempfile.mkdtemp(prefix=f"amg_{query_id[:12]}_", dir=tmp_root)
     try:
+        # Write reference sketch paths to a file (one per line)
         refs_file = os.path.join(worker_tmp, "refs.txt")
         with open(refs_file, "w") as f:
             for npath in ref_paths.values():
                 f.write(npath + "\n")
 
+        # Reverse lookup: absolute sketch path -> genome_id
         path_to_id = {v: k for k, v in ref_paths.items()}
+
         neighbor_results = defaultdict(dict)
 
         for metric in ("jaccard", "containment"):
@@ -173,7 +174,7 @@ def _run_filter_for_query(args: tuple):
                 "--query",         query_sketch,
                 "--refs-filelist", refs_file,
                 "--metric",        metric,
-                "--threshold",     "0.0",
+                "--threshold",     "0.0",   # include all pairs regardless of score
                 "--output",        out_file,
             ]
             try:
@@ -188,6 +189,10 @@ def _run_filter_for_query(args: tuple):
             if not os.path.exists(out_file):
                 continue
 
+            # Parse TSV columns: reference, {metric}_score, intersection,
+            #                    size_query, size_ref, union
+            # For MaxGeomHash, intersection and union are always 0;
+            # size_query and size_ref (sketch element counts) are populated.
             with open(out_file) as f:
                 next(f, None)   # skip header line
                 for line in f:
@@ -207,6 +212,7 @@ def _run_filter_for_query(args: tuple):
                         continue
 
                     neighbor_results[nid][metric] = score
+                    # sizes are the same regardless of metric; store only once
                     if "size_query" not in neighbor_results[nid]:
                         neighbor_results[nid]["size_query"] = size_q
                         neighbor_results[nid]["size_ref"]   = size_r
@@ -223,12 +229,12 @@ def _run_filter_for_query(args: tuple):
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="BottomK pairwise similarity for GTDB candidate pairs.",
+        description="MaxGeomHash pairwise similarity for GTDB candidate pairs.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--sketch-dir", required=True,
-                   help="Directory of *.bottomk.sketch files "
-                        "(from 03_bottomk_sketch.sh)")
+                    help="Directory of *.maxgeom.sketch files "
+                        "(from 05_maxgeom_sketch.sh)")
     p.add_argument("--candidates", required=True,
                    help="FracMinHash pairwise CSV with query_name/match_name columns "
                         "(gtdb_pairwise_containment.csv)")
@@ -265,12 +271,12 @@ def main():
 
     if not pairs:
         log.error(
-            "No pairs to process. Run 03_bottomk_sketch.sh first "
+            "No pairs to process. Run 05_1_maxgeom_sketch.sh first "
             "(with TEST_N set if testing)."
         )
         sys.exit(1)
 
-    # ---- Build adjacency list -------------------------------------------------
+    # ---- Build adjacency list: genome -> set of candidate neighbors -----------
     neighbors = defaultdict(set)
     for a, b in pairs:
         neighbors[a].add(b)
@@ -279,7 +285,7 @@ def main():
     unique_queries = sorted(neighbors.keys())
     log.info("  %d unique genomes will be processed as queries.", len(unique_queries))
 
-    # ---- Genome index ---------------------------------------------------------
+    # ---- Genome index (all sketched genomes, sorted for reproducibility) ------
     genome_ids  = sorted(available)
     name_to_idx = {gid: i for i, gid in enumerate(genome_ids)}
     n_genomes   = len(genome_ids)
@@ -290,9 +296,9 @@ def main():
     log.info("Genome index written to %s  (%d entries)", index_path, n_genomes)
 
     # ---- Shared temp directory ------------------------------------------------
-    tmp_root = tempfile.mkdtemp(prefix="bk_pairwise_tmp_", dir=str(out_dir))
+    tmp_root = tempfile.mkdtemp(prefix="amg_pairwise_tmp_", dir=str(out_dir))
 
-    # ---- Build task list ------------------------------------------------------
+    # ---- Build task list: one task per unique query genome -------------------
     tasks = [
         (qid, list(neighbors[qid]), args.sketch_dir, filter_bin, tmp_root)
         for qid in unique_queries
@@ -302,6 +308,10 @@ def main():
              n_tasks, args.cores)
 
     # ---- Run workers ----------------------------------------------------------
+    # raw_data[(query_id, ref_id)] holds the filter output for that directed pair.
+    # Each canonical pair (A, B) with A < B is represented by TWO entries:
+    #   raw_data[(A, B)]  — from running A as the query  → containment(B in A)
+    #   raw_data[(B, A)]  — from running B as the query  → containment(A in B)
     raw_data = {}
     n_done   = 0
     t_report = time.time()
@@ -327,27 +337,38 @@ def main():
 
     shutil.rmtree(tmp_root, ignore_errors=True)
 
-    # ---- Aggregate results per canonical pair ---------------------------------
+    # ---- Aggregate results per canonical pair --------------------------------
+    # For pair (A, B) with A < B:
+    #   raw_data[(A, B)]['jaccard']                  -> Jaccard estimate
+    #   raw_data[(A, B)]['containment_ref_in_query'] -> containment(B in A)
+    #                                                   = containment_match_in_query
+    #   raw_data[(B, A)]['containment_ref_in_query'] -> containment(A in B)
+    #                                                   = containment_query_in_match
     log.info("Aggregating results for %d canonical pairs ...", len(pairs))
 
-    rows_, cols_           = [], []
-    jac_, cqm_, cmq_, mc_ = [], [], [], []
-    sq_, sr_               = [], []
-    n_incomplete           = 0
+    rows_, cols_                = [], []
+    jac_, cqm_, cmq_, mc_      = [], [], [], []
+    sq_, sr_                    = [], []    # sketch element counts
+    n_incomplete                = 0
 
     for a, b in pairs:
         ab = raw_data.get((a, b), {})
         ba = raw_data.get((b, a), {})
 
-        jac_val     = ab.get("jaccard") if ab.get("jaccard") is not None \
-                      else ba.get("jaccard")
+        # Use Jaccard from whichever direction ran successfully (it's symmetric)
+        jac_val = ab.get("jaccard") if ab.get("jaccard") is not None \
+                  else ba.get("jaccard")
+
+        # containment(B in A): from the (A-query, B-ref) run
         cont_b_in_a = ab.get("containment")
+        # containment(A in B): from the (B-query, A-ref) run
         cont_a_in_b = ba.get("containment")
 
         if jac_val is None or cont_b_in_a is None or cont_a_in_b is None:
             n_incomplete += 1
             continue
 
+        # Sketch element counts (size_query when A is query = size of A's sketch)
         size_a = ab.get("size_query", 0) or ba.get("size_ref", 0)
         size_b = ab.get("size_ref",   0) or ba.get("size_query", 0)
 
@@ -356,20 +377,21 @@ def main():
         rows_.append(i)
         cols_.append(j)
         jac_.append(jac_val)
-        cqm_.append(cont_a_in_b)
-        cmq_.append(cont_b_in_a)
+        cqm_.append(cont_a_in_b)    # containment of query (A) in match (B)
+        cmq_.append(cont_b_in_a)    # containment of match (B) in query (A)
         mc_.append(max(cont_a_in_b, cont_b_in_a))
         sq_.append(size_a)
         sr_.append(size_b)
 
     if n_incomplete:
         log.warning(
-            "%d pairs had incomplete filter results and were skipped.",
+            "%d pairs had incomplete filter results and were skipped "
+            "(filter may have returned no output for one direction).",
             n_incomplete,
         )
     log.info("Recording %d complete pairs.", len(rows_))
 
-    # ---- Save NPZ -------------------------------------------------------------
+    # ---- Save NPZ (mirrors kmc_pairwise format for easy comparison) ----------
     npz_path = str(out_dir / "pairwise_results.npz")
     np.savez_compressed(
         npz_path,
@@ -389,12 +411,11 @@ def main():
     elapsed_total = time.time() - t0
     npz_size_mb   = os.path.getsize(npz_path) / 1024 ** 2
     sketch_dir_size_bytes = sum(
-        p.stat().st_size for p in Path(args.sketch_dir).glob(f"*{_SKETCH_EXT}")
+        p.stat().st_size for p in Path(args.sketch_dir).glob("*.maxgeom.sketch")
     )
 
     stats = {
-        "script":                   "06_bottomk_pairwise.py",
-        "algo":                     "bottomk",
+        "script":                   "08_1_maxgeom_pairwise.py",
         "sketch_dir":               args.sketch_dir,
         "candidates_csv":           args.candidates,
         "n_sketches_available":     len(available),
@@ -430,11 +451,23 @@ def main():
     print(f"  Run stats               : {stats_path}")
     print("=========================================================================")
     print()
+    print("To load results in Python:")
+    print(f"  import numpy as np, json")
+    print(f"  data = np.load('{npz_path}')")
+    print("  row, col            = data['row'], data['col']")
+    print("  jaccard             = data['jaccard']")
+    print("  max_containment     = data['max_containment']")
+    print("  cont_query_in_match = data['containment_query_in_match']")
+    print("  cont_match_in_query = data['containment_match_in_query']")
+    print("  size_query          = data['size_query_sketch']")
+    print("  size_ref            = data['size_ref_sketch']")
+    print()
     print("Next step (sanity check):")
     print(f"  python3 {_SCRIPT_DIR}/09_sanity_check.py \\")
-    print(f"      --bottomk-pairwise   {out_dir} \\")
-    print(f"      --kmc-pairwise       <kmc_pairwise_dir> \\")
-    print(f"      --output             {out_dir}/sanity_check")
+    print(f"      --amg-pairwise  {out_dir} \\")
+    print(f"      --fracminhash   {Path(args.candidates).parent}/gtdb_pairwise_containment.csv \\")
+    print(f"      --kmc-pairwise  {Path(args.candidates).parent}/kmc_pairwise \\")
+    print(f"      --output        {out_dir}/sanity_check")
 
 
 if __name__ == "__main__":
