@@ -75,6 +75,47 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Config loader
+# ---------------------------------------------------------------------------
+
+def load_config() -> dict:
+    """
+    Load config.json from the project root (two levels above this script).
+    Returns a flat dict of label-ready parameter strings for each method.
+    Falls back to hardcoded defaults if the file is missing.
+    """
+    cfg_path = Path(__file__).parent.parent / "config.json"
+    try:
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        log.warning("config.json not found at %s — using hardcoded defaults.", cfg_path)
+        return _default_labels()
+
+    kmer = cfg.get("kmer", 31)
+    mg   = cfg.get("maxgeom",     {})
+    amg  = cfg.get("alphamaxgeom", {})
+    bk   = cfg.get("bottomk",     {})
+    fmh  = cfg.get("fracminhash", {})
+
+    return {
+        "minhash_label":     f"MinHash\n(k={bk.get('k', 1000)}, kmer={kmer})",
+        "mg_label":          f"MaxGeomHash\n(W={mg.get('w', 64)}, b={mg.get('b', 90)}, k={kmer})",
+        "amg_label":         f"AlphaMaxGeomHash\n(W={amg.get('w', 64)}, \u03b1={amg.get('alpha', 0.45)}, k={kmer})",
+        "fracminhash_label": f"FracMinHash\n(scale={fmh.get('scale', 0.01)}, k={kmer})",
+    }
+
+
+def _default_labels() -> dict:
+    return {
+        "minhash_label":     "MinHash\n(k=1000, kmer=31)",
+        "mg_label":          "MaxGeomHash\n(W=64, b=90, k=31)",
+        "amg_label":         "AlphaMaxGeomHash\n(W=64, \u03b1=0.45, k=31)",
+        "fracminhash_label": "FracMinHash\n(scale=0.01, k=31)",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Publication style (mirrors 10_plot_heatmaps.py)
 # ---------------------------------------------------------------------------
 plt.rcParams.update({
@@ -635,11 +676,12 @@ def main():
             kmc["genome_id_to_int"], N,
         )
 
+    cfg = load_config()
     datasets = [
-        (_load_dir(args.bottomk_pairwise,     "MinHash"),          "MinHash\n(k=1000, kmer=31)"),
-        (_load_dir(args.mg_pairwise,          "MaxGeomHash"),       "MaxGeomHash\n(W=64, b=90, k=31)"),
-        (_load_dir(args.amg_pairwise,         "AlphaMaxGeomHash"), "AlphaMaxGeomHash\n(W=64, α=0.45, k=31)"),
-        (_load_dir(args.fracminhash_pairwise, "FracMinHash"),      "FracMinHash\n(scale=0.01, k=31)"),
+        (_load_dir(args.bottomk_pairwise,     "MinHash"),          cfg["minhash_label"]),
+        (_load_dir(args.mg_pairwise,          "MaxGeomHash"),       cfg["mg_label"]),
+        (_load_dir(args.amg_pairwise,         "AlphaMaxGeomHash"), cfg["amg_label"]),
+        (_load_dir(args.fracminhash_pairwise, "FracMinHash"),      cfg["fracminhash_label"]),
     ]
 
     # ---- Compute absolute and relative errors ---------------------------------

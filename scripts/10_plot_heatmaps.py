@@ -67,6 +67,49 @@ import pandas as pd
 from scipy.cluster.hierarchy import linkage, leaves_list
 from scipy.spatial.distance import squareform
 
+# ---------------------------------------------------------------------------
+# Config loader
+# ---------------------------------------------------------------------------
+
+def load_config() -> dict:
+    """
+    Load config.json from the project root (two levels above this script).
+    Returns a flat dict of label-ready parameter strings for each method.
+    Falls back to hardcoded defaults if the file is missing.
+    """
+    cfg_path = Path(__file__).parent.parent / "config.json"
+    try:
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        log.warning("config.json not found at %s — using hardcoded defaults.", cfg_path)
+        return _default_labels()
+
+    kmer = cfg.get("kmer", 31)
+    mg   = cfg.get("maxgeom",     {})
+    amg  = cfg.get("alphamaxgeom", {})
+    bk   = cfg.get("bottomk",     {})
+    fmh  = cfg.get("fracminhash", {})
+
+    return {
+        "minhash_label":       f"MinHash\n(k={bk.get('k', 1000)}, kmer={kmer})",
+        "mg_label":            f"MaxGeomHash\n(W={mg.get('w', 64)}, b={mg.get('b', 90)}, k={kmer})",
+        "amg_label":           f"AlphaMaxGeomHash\n(W={amg.get('w', 64)}, \u03b1={amg.get('alpha', 0.45)}, k={kmer})",
+        "fracminhash_label":   f"FracMinHash\n(scale={fmh.get('scale', 0.01)}, k={kmer})",
+        "sourmash_label":      f"Sourmash FracMinHash\n(scaled=1000, k={kmer})",
+    }
+
+
+def _default_labels() -> dict:
+    return {
+        "minhash_label":     "MinHash\n(k=1000, kmer=31)",
+        "mg_label":          "MaxGeomHash\n(W=64, b=90, k=31)",
+        "amg_label":         "AlphaMaxGeomHash\n(W=64, \u03b1=0.45, k=31)",
+        "fracminhash_label": "FracMinHash\n(scale=0.01, k=31)",
+        "sourmash_label":    "Sourmash FracMinHash\n(scaled=1000, k=31)",
+    }
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -683,6 +726,7 @@ def main():
             N,
         )
 
+    cfg    = load_config()
     amg    = _load_npz_dir(args.amg_pairwise,          "AlphaMaxGeomHash")
     mg     = _load_npz_dir(args.mg_pairwise,           "MaxGeomHash")
     bk     = _load_npz_dir(args.bottomk_pairwise,      "MinHash")
@@ -720,11 +764,11 @@ def main():
     # Each entry: {"label": str, "err": M×M relative error array, "l1": float}
     # ------------------------------------------------------------------
     method_specs = [
-        (bk,     "MinHash\n(k=1000, kmer=31)"),
-        (mg,     "MaxGeomHash\n(W=64, b=90, k=31)"),
-        (amg,    "AlphaMaxGeomHash\n(W=64, α=0.45, k=31)"),
-        (fmh_ks, "FracMinHash\n(scale=0.01, k=31)"),
-        (fmh_ss, "Sourmash FracMinHash\n(scaled=1000, k=31)"),
+        (bk,     cfg["minhash_label"]),
+        (mg,     cfg["mg_label"]),
+        (amg,    cfg["amg_label"]),
+        (fmh_ks, cfg["fracminhash_label"]),
+        (fmh_ss, cfg["sourmash_label"]),
     ]
 
     # Precompute lower-triangle indices once for L1 computation

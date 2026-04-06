@@ -16,18 +16,20 @@
 #   4. 03_bottomk_sketch.sh                 — BottomK sketches (kmer-sketch)
 #   5. 04_fracminhash_sketch.sh             — FracMinHash sketches (kmer-sketch)
 #   6. 05_alphamaxgeom_sketch.sh            — AlphaMaxGeomHash sketches (kmer-sketch)
-#   7. 06_bottomk_pairwise.sh              — BottomK pairwise on candidates
-#   8. 07_fracminhash_pairwise.sh          — FracMinHash pairwise on candidates
-#   9. 08_alphamaxgeom_pairwise.sh         — AlphaMaxGeomHash pairwise on candidates
-#  10. 10_run_plots.sh                     — publication figures (full + subset heatmaps)
+#   7. 05_1_maxgeom_sketch.sh              — MaxGeomHash sketches (kmer-sketch)
+#   8. 06_bottomk_pairwise.sh              — BottomK pairwise on candidates
+#   9. 07_fracminhash_pairwise.sh          — FracMinHash pairwise on candidates
+#  10. 08_alphamaxgeom_pairwise.sh         — AlphaMaxGeomHash pairwise on candidates
+#  11. 08_1_maxgeom_pairwise.sh            — MaxGeomHash pairwise on candidates
+#  12. 10_run_plots.sh                     — publication figures (full + subset heatmaps)
 #
 # Note: 09_sanity_check.py is omitted here because it is slow; run it manually
 # when needed.
 #
-# Steps 3-9 all depend on the candidates CSV from step 2.
-# Steps 4-6 (sketching) can run in parallel with each other; steps 7-9
+# Steps 3-11 all depend on the candidates CSV from step 2.
+# Steps 4-7 (sketching) can run in parallel with each other; steps 8-11
 # each depend on their corresponding sketch step.
-# Steps 7-9 can all run in parallel once 4-6 are done.
+# Steps 8-11 can all run in parallel once 4-7 are done.
 #
 # Usage:
 #   bash scripts/run_sketch_and_pairwise_plus_plot.sh
@@ -67,16 +69,18 @@ run_step "compute_fracminhash_candidates" "$BASE/scripts/compute_fracminhash_can
 # Step 3: KMC exact pairwise on new candidate set
 run_step "02_kmc_pairwise" "$BASE/scripts/02_kmc_pairwise.sh"
 
-# Steps 4-6: kmer-sketch sketching (can run in parallel, but run serially here
+# Steps 4-7: kmer-sketch sketching (can run in parallel, but run serially here
 # to avoid saturating I/O; adjust if on a multi-node setup)
-run_step "03_bottomk_sketch"     "$BASE/scripts/03_bottomk_sketch.sh"
-run_step "04_fracminhash_sketch" "$BASE/scripts/04_fracminhash_sketch.sh"
+run_step "03_bottomk_sketch"      "$BASE/scripts/03_bottomk_sketch.sh"
+run_step "04_fracminhash_sketch"  "$BASE/scripts/04_fracminhash_sketch.sh"
 run_step "05_alphamaxgeom_sketch" "$BASE/scripts/05_alphamaxgeom_sketch.sh"
+run_step "05_1_maxgeom_sketch"    "$BASE/scripts/05_1_maxgeom_sketch.sh"
 
-# Steps 7-9: kmer-sketch pairwise on new candidate set
-run_step "06_bottomk_pairwise"     "$BASE/scripts/06_bottomk_pairwise.sh"
-run_step "07_fracminhash_pairwise" "$BASE/scripts/07_fracminhash_pairwise.sh"
+# Steps 8-11: kmer-sketch pairwise on new candidate set
+run_step "06_bottomk_pairwise"      "$BASE/scripts/06_bottomk_pairwise.sh"
+run_step "07_fracminhash_pairwise"  "$BASE/scripts/07_fracminhash_pairwise.sh"
 run_step "08_alphamaxgeom_pairwise" "$BASE/scripts/08_alphamaxgeom_pairwise.sh"
+run_step "08_1_maxgeom_pairwise"    "$BASE/scripts/08_1_maxgeom_pairwise.sh"
 
 # Step 10: Figures — full Datashader heatmaps (11_plot_heatmaps_full.py) AND
 # dense subset heatmaps (10_plot_heatmaps.py, SUBSET_HEATMAP=1)
