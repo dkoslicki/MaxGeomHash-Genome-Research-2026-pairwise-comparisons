@@ -92,8 +92,9 @@ plt.rcParams.update({
 METHOD_COLORS = {
     "KMC (exact)":              {"index": "#2166AC", "pairwise": "#92C5DE"},  # blues
     "MinHash":                  {"index": "#762A83", "pairwise": "#C2A5CF"},  # purples
+    "MaxGeomHash":              {"index": "#1B7837", "pairwise": "#7FBF7B"},  # dark greens
+    "AlphaMaxGeomHash":         {"index": "#4DAC26", "pairwise": "#B8E186"},  # light greens
     "FracMinHash":              {"index": "#D6604D", "pairwise": "#F4A582"},  # reds
-    "AlphaMaxGeomHash":         {"index": "#4DAC26", "pairwise": "#B8E186"},  # greens
     # Sourmash FracMinHash (off by default; add via --include-sourmash):
     "Sourmash FracMinHash":     {"index": "#8C510A", "pairwise": "#DFC27D"},  # browns
 }
@@ -335,6 +336,23 @@ def collect_stats(base, include_sourmash=False):
                                               "wall_clock_seconds", "cores"),
         "index_bytes":      disk_bytes(data / "bottomk_sketches"),
         "pairwise_bytes":   disk_bytes(data / "bottomk_pairwise_thr0001"),
+        "index_ram_kb":     None,
+        "pairwise_ram_kb":  None,
+    }
+
+    # ------------------------------------------------------------------
+    # MaxGeomHash
+    # ------------------------------------------------------------------
+    mg_sketch_json   = data / "maxgeom_sketches"          / "sketch_run_stats.json"
+    mg_pairwise_json = data / "maxgeom_pairwise_thr0001"  / "pairwise_run_stats.json"
+
+    stats["MaxGeomHash"] = {
+        "index_seconds":    _json_cpu_seconds(mg_sketch_json,
+                                              "wall_clock_seconds", "parallel_jobs"),
+        "pairwise_seconds": _json_cpu_seconds(mg_pairwise_json,
+                                              "wall_clock_seconds", "cores"),
+        "index_bytes":      disk_bytes(data / "maxgeom_sketches"),
+        "pairwise_bytes":   disk_bytes(data / "maxgeom_pairwise_thr0001"),
         "index_ram_kb":     None,
         "pairwise_ram_kb":  None,
     }
@@ -604,8 +622,9 @@ def plot_tradeoff(stats, sanity_json, out_dir, method_order=None):
     accuracy = {"KMC (exact)": 1.0}
     # 09_sanity_check.py writes labels like "AlphaMaxGeomHash vs KMC -- Jaccard"
     label_map = {
-        "AlphaMaxGeomHash":          "AlphaMaxGeomHash vs KMC -- Jaccard",
         "MinHash":                   "BottomK vs KMC -- Jaccard",
+        "MaxGeomHash":               "MaxGeomHash vs KMC -- Jaccard",
+        "AlphaMaxGeomHash":          "AlphaMaxGeomHash vs KMC -- Jaccard",
         "FracMinHash":               "FracMinHash (kmer-sketch) vs KMC -- Jaccard",
         "Sourmash FracMinHash":      "Sourmash FMH vs KMC -- Jaccard",
     }
@@ -662,40 +681,44 @@ def plot_tradeoff(stats, sanity_json, out_dir, method_order=None):
 # Figure 4 -- Pairwise accuracy  (L1 error bar chart, one per metric)
 # ---------------------------------------------------------------------------
 
-def plot_accuracy(l1_json, out_dir, metric, method_order=None):
+def plot_accuracy(l1_json, out_dir, metric, method_order=None,
+                  error_key=None, ylabel_tmpl=None, stem_tmpl=None):
     """
-    Bar chart of mean |error| (mean of |estimate − KMC exact| over all pairs)
-    for each sketching method.
-
-    Values are read from l1_errors.json written by 10_plot_heatmaps.py.
-    KMC (exact) is the reference and is excluded from this chart.
+    Bar chart of per-method accuracy error for a given metric.
 
     Parameters
     ----------
-    l1_json     : path to l1_errors.json (written by 10_plot_heatmaps.py)
-    out_dir     : output directory
-    metric      : "jaccard" or "max_containment"
-    method_order: display order (KMC will be skipped automatically)
+    l1_json      : path to l1_errors.json (written by 10_plot_heatmaps.py /
+                   11_plot_heatmaps_full.py)
+    out_dir      : output directory
+    metric       : "jaccard" or "max_containment"
+    method_order : display order (KMC will be skipped automatically)
+    error_key    : key in l1_errors.json to read (default: metric, i.e. MAE).
+                   Pass "{metric}_relative" for mean relative error.
+    ylabel_tmpl  : y-axis label template with {metric_label} placeholder.
+    stem_tmpl    : output filename stem template with {metric} placeholder.
     """
     l1_json = Path(l1_json)
     if not l1_json.exists():
         log.warning("L1 errors file not found (%s) — skipping accuracy bar chart "
-                    "for %s.  Run 10_plot_heatmaps.py first.", l1_json, metric)
+                    "for %s.  Run 10_plot_heatmaps.py or 11_plot_heatmaps_full.py first.",
+                    l1_json, metric)
         return
 
     with open(l1_json) as f:
         all_l1 = json.load(f)
 
-    l1_for_metric = all_l1.get(metric)
+    key = error_key if error_key is not None else metric
+    l1_for_metric = all_l1.get(key)
     if not l1_for_metric:
-        log.warning("No L1 data for metric '%s' in %s — skipping.", metric, l1_json)
+        log.warning("No L1 data for key '%s' in %s — skipping.", key, l1_json)
         return
 
     # Build ordered list, skipping KMC and any method not in the L1 data
     sketch_methods = [m for m in (method_order or list(l1_for_metric.keys()))
                       if m != "KMC (exact)" and m in l1_for_metric]
     if not sketch_methods:
-        log.warning("No sketch-method L1 data found for metric '%s' — skipping.", metric)
+        log.warning("No sketch-method L1 data found for key '%s' — skipping.", key)
         return
 
     n     = len(sketch_methods)
@@ -706,9 +729,9 @@ def plot_accuracy(l1_json, out_dir, metric, method_order=None):
 
     for i, method in enumerate(sketch_methods):
         col  = METHOD_COLORS.get(method, {"index": "#888"})["index"]
-        l1   = l1_for_metric[method]
-        bar  = ax.bar(i, l1, width, color=col, edgecolor="white", linewidth=0.5)
-        ax.text(i, l1 * 1.02, f"{l1:.6f}",
+        val  = l1_for_metric[method]
+        ax.bar(i, val, width, color=col, edgecolor="white", linewidth=0.5)
+        ax.text(i, val * 1.02, f"{val:.6f}",
                 ha="center", va="bottom", fontsize=8, color="#222")
 
     metric_label = {
@@ -716,14 +739,19 @@ def plot_accuracy(l1_json, out_dir, metric, method_order=None):
         "max_containment": "Max containment",
     }.get(metric, metric)
 
+    if ylabel_tmpl is None:
+        ylabel_tmpl = "Mean |error|  (|estimate − KMC exact|,  {metric_label})"
+    if stem_tmpl is None:
+        stem_tmpl = "accuracy_l1_{metric}"
+
     ax.set_xticks(x)
     ax.set_xticklabels(sketch_methods, fontsize=8, rotation=15, ha="right")
-    ax.set_ylabel(f"Mean |error|  (|estimate − KMC exact|,  {metric_label})", fontsize=9)
+    ax.set_ylabel(ylabel_tmpl.format(metric_label=metric_label), fontsize=9)
     ax.set_ylim(0, max(l1_for_metric[m] for m in sketch_methods) * 1.2)
     ax.yaxis.grid(True, linestyle="--", linewidth=0.4, alpha=0.6)
     ax.set_axisbelow(True)
 
-    stem = f"accuracy_l1_{metric}"
+    stem = stem_tmpl.format(metric=metric)
     for suffix in (".pdf", ".png"):
         fpath = out_dir / (stem + suffix)
         fig.savefig(fpath)
@@ -773,11 +801,11 @@ def main():
         )
 
     # Display order: KMC first (exact baseline), then sketch methods
-    # left-to-right by increasing resource usage (theory prediction):
-    #   MinHash < AlphaMaxGeomHash < FracMinHash
+    # left-to-right as requested: MinHash, MGH, aMGH, FracMinHash
     method_order = [
         "KMC (exact)",
         "MinHash",
+        "MaxGeomHash",
         "AlphaMaxGeomHash",
         "FracMinHash",
     ]
@@ -815,13 +843,25 @@ def main():
     log.info("Generating accuracy vs. resource trade-off figure ...")
     plot_tradeoff(stats, sanity_json, out_dir, method_order)
 
-    # L1 accuracy bar charts (one per metric).
-    # l1_errors.json is written by 10_plot_heatmaps.py into the same output dir.
+    # L1 accuracy bar charts (one per metric, one per error type).
+    # l1_errors.json is written by 10_plot_heatmaps.py / 11_plot_heatmaps_full.py.
     l1_json = out_dir / "l1_errors.json"
     sketch_method_order = [m for m in method_order if m != "KMC (exact)"]
     for metric in ("jaccard", "max_containment"):
-        log.info("Generating L1 accuracy bar chart (%s) ...", metric)
-        plot_accuracy(l1_json, out_dir, metric, sketch_method_order)
+        log.info("Generating mean absolute error bar chart (%s) ...", metric)
+        plot_accuracy(
+            l1_json, out_dir, metric, sketch_method_order,
+            error_key=metric,
+            ylabel_tmpl="Mean absolute error  |estimate − KMC exact|  ({metric_label})",
+            stem_tmpl="accuracy_mae_{metric}",
+        )
+        log.info("Generating mean relative error bar chart (%s) ...", metric)
+        plot_accuracy(
+            l1_json, out_dir, metric, sketch_method_order,
+            error_key=f"{metric}_relative",
+            ylabel_tmpl="Mean relative error  |estimate − KMC exact| / KMC exact  ({metric_label})",
+            stem_tmpl="accuracy_mre_{metric}",
+        )
 
     summary_path = out_dir / "resource_summary.json"
     with open(summary_path, "w") as f:

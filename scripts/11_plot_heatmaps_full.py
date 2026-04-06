@@ -312,7 +312,8 @@ def make_error_dataframe(
     err   = np.abs(m_vals[valid] - k_vals[valid])
     keys_v = keys_m[valid]
 
-    l1   = float(err.sum())
+    n_valid    = int(valid.sum())
+    mean_abs_l1 = float(err.mean()) if n_valid > 0 else 0.0
     rows = (keys_v // N).astype(np.int32)   # canonical lo index
     cols = (keys_v  % N).astype(np.int32)   # canonical hi index
 
@@ -321,7 +322,47 @@ def make_error_dataframe(
     y = np.concatenate([rank[cols], rank[rows]]).astype(np.float32)
     e = np.tile(err.astype(np.float32), 2)
 
-    return pd.DataFrame({"x": x, "y": y, "err": e}), l1
+    return pd.DataFrame({"x": x, "y": y, "err": e}), mean_abs_l1
+
+
+def make_relative_error_dataframe(
+    kmc_keys:   np.ndarray,
+    kmc_vals:   np.ndarray,
+    meth_keys:  np.ndarray,
+    meth_vals:  np.ndarray,
+    rank:       np.ndarray,
+    N:          int,
+    min_gt:     float = 1e-6,
+) -> tuple:
+    """
+    Like make_error_dataframe but computes relative error |estimate − exact| / exact.
+
+    Returns (df, mean_rel_l1) where df has columns (x, y, err) with err = relative error.
+    """
+    pos      = np.searchsorted(kmc_keys, meth_keys)
+    in_range = pos < len(kmc_keys)
+    pos_safe = np.where(in_range, pos, 0)
+    matched  = in_range & (kmc_keys[pos_safe] == meth_keys)
+
+    m_vals = meth_vals[matched]
+    k_vals = kmc_vals[pos_safe[matched]]
+    keys_m = meth_keys[matched]
+
+    valid   = (k_vals > min_gt) & np.isfinite(m_vals) & np.isfinite(k_vals)
+    rel_err = np.abs(m_vals[valid] - k_vals[valid]) / k_vals[valid]
+    keys_v  = keys_m[valid]
+
+    n_valid      = int(valid.sum())
+    mean_rel_l1  = float(rel_err.mean()) if n_valid > 0 else 0.0
+
+    rows = (keys_v // N).astype(np.int32)
+    cols = (keys_v  % N).astype(np.int32)
+
+    x = np.concatenate([rank[rows], rank[cols]]).astype(np.float32)
+    y = np.concatenate([rank[cols], rank[rows]]).astype(np.float32)
+    e = np.tile(rel_err.astype(np.float32), 2)
+
+    return pd.DataFrame({"x": x, "y": y, "err": e}), mean_rel_l1
 
 
 def make_similarity_dataframe(
@@ -402,6 +443,7 @@ def plot_heatmaps_full(
     ordering_label: str,
     out_dir:       Path,
     show_reference: bool = False,
+    error_type:    str  = "absolute",  # "absolute" or "relative"
 ):
     cmap_err = plt.cm.RdYlBu_r
     cmap_ref = plt.cm.viridis
@@ -454,6 +496,11 @@ def plot_heatmaps_full(
         err_col_start = 1
 
     # ---- Error panels (one per method) ----------------------------------------
+    if error_type == "relative":
+        panel_suffix = f"|error| / KMC ({metric_label})"
+    else:
+        panel_suffix = f"|error| vs KMC ({metric_label})"
+
     for col_idx, m in enumerate(methods, start=err_col_start):
         log.info("  Rasterising %s ...", m["label"].split("\n")[0])
         rgba = rasterise(m["df"], "err", N, canvas_size, vmax_err, lut_err)
@@ -461,7 +508,7 @@ def plot_heatmaps_full(
         ax = fig.add_subplot(gs[0, col_idx])
         ax.imshow(rgba, aspect="auto", interpolation="nearest")
         ax.set_title(
-            f"{m['label']}\n|error| vs KMC ({metric_label})",
+            f"{m['label']}\n{panel_suffix}",
             fontsize=10, pad=4,
         )
         ax.set_xticks([]); ax.set_yticks([])
@@ -474,11 +521,18 @@ def plot_heatmaps_full(
     sm_err.set_array([])
     cax_err = fig.add_subplot(gs[1, err_col_start:])
     cb_err  = fig.colorbar(sm_err, cax=cax_err, orientation="horizontal")
-    cb_err.set_label(
-        f"Absolute error  |estimated − exact|"
-        f"  (0 = blue, ≥{vmax_err:.4f} = red)",
-        fontsize=8,
-    )
+    if error_type == "relative":
+        cb_err.set_label(
+            f"Relative error  |estimated − exact| / exact"
+            f"  (0 = blue, ≥{vmax_err:.0%} = red)",
+            fontsize=8,
+        )
+    else:
+        cb_err.set_label(
+            f"Absolute error  |estimated − exact|"
+            f"  (0 = blue, ≥{vmax_err:.4f} = red)",
+            fontsize=8,
+        )
     cb_err.ax.tick_params(labelsize=7)
     cax_err.legend(
         handles=[Patch(
@@ -490,7 +544,7 @@ def plot_heatmaps_full(
     )
 
     metric_stem = metric_label.lower().replace(" ", "_")
-    stem = f"heatmap_{metric_stem}_absolute_error_full_{ordering_label}"
+    stem = f"heatmap_{metric_stem}_{error_type}_error_full_{ordering_label}"
     for suffix in (".pdf", ".png"):
         fpath = out_dir / (stem + suffix)
         fig.savefig(fpath)
@@ -509,6 +563,8 @@ def parse_args():
     )
     p.add_argument("--amg-pairwise",         default="",
                    help="AlphaMaxGeomHash pairwise directory")
+    p.add_argument("--mg-pairwise",          default="",
+                   help="MaxGeomHash pairwise directory")
     p.add_argument("--bottomk-pairwise",     default="",
                    help="BottomK/MinHash pairwise directory")
     p.add_argument("--fracminhash-pairwise", default="",
@@ -581,14 +637,17 @@ def main():
 
     datasets = [
         (_load_dir(args.bottomk_pairwise,     "MinHash"),          "MinHash\n(k=1000, kmer=31)"),
-        (_load_dir(args.amg_pairwise,          "AlphaMaxGeomHash"), "AlphaMaxGeomHash\n(W=64, α=0.45, k=31)"),
-        (_load_dir(args.fracminhash_pairwise,  "FracMinHash"),      "FracMinHash\n(scale=0.01, k=31)"),
+        (_load_dir(args.mg_pairwise,          "MaxGeomHash"),       "MaxGeomHash\n(W=64, b=90, k=31)"),
+        (_load_dir(args.amg_pairwise,         "AlphaMaxGeomHash"), "AlphaMaxGeomHash\n(W=64, α=0.45, k=31)"),
+        (_load_dir(args.fracminhash_pairwise, "FracMinHash"),      "FracMinHash\n(scale=0.01, k=31)"),
     ]
 
-    # ---- Compute absolute errors ----------------------------------------------
-    log.info("Computing absolute errors ...")
-    methods          = []
-    all_err_samples  = []
+    # ---- Compute absolute and relative errors ---------------------------------
+    log.info("Computing absolute and relative errors ...")
+    abs_methods      = []
+    rel_methods      = []
+    all_abs_samples  = []
+    all_rel_samples  = []
 
     for dataset, label in datasets:
         if dataset is None:
@@ -598,32 +657,45 @@ def main():
             log.warning("%s: metric '%s' not in NPZ — skipping.", label, metric)
             continue
 
-        df, l1 = make_error_dataframe(
+        abs_df, mean_abs_l1 = make_error_dataframe(
             kmc["keys"], kmc_vals,
             dataset["keys"], meth_vals,
             rank, N,
         )
-        n_pairs = len(df) // 2
-        log.info("  %-30s %10d pairs   L1 = %.4f",
-                 label.split("\n")[0], n_pairs, l1)
+        rel_df, mean_rel_l1 = make_relative_error_dataframe(
+            kmc["keys"], kmc_vals,
+            dataset["keys"], meth_vals,
+            rank, N,
+        )
+        n_pairs = len(abs_df) // 2
+        log.info("  %-30s %10d pairs   MAE = %.6f  mean_rel = %.6f",
+                 label.split("\n")[0], n_pairs, mean_abs_l1, mean_rel_l1)
 
-        methods.append({"label": label, "df": df, "l1": l1})
+        abs_methods.append({"label": label, "df": abs_df,
+                             "mean_l1": mean_abs_l1, "mean_rel_l1": mean_rel_l1})
+        rel_methods.append({"label": label, "df": rel_df,
+                             "mean_l1": mean_abs_l1, "mean_rel_l1": mean_rel_l1})
 
         # Sample up to 1 M values for vmax estimation (avoid huge alloc)
-        err_col = df["err"].values
-        step    = max(1, len(err_col) // 1_000_000)
-        all_err_samples.append(err_col[::step])
+        for samples_list, df in [(all_abs_samples, abs_df), (all_rel_samples, rel_df)]:
+            err_col = df["err"].values
+            step    = max(1, len(err_col) // 1_000_000)
+            samples_list.append(err_col[::step])
 
-    if not methods:
+    if not abs_methods:
         log.error("No method data available — provide at least one of "
-                  "--amg-pairwise, --bottomk-pairwise, --fracminhash-pairwise.")
+                  "--mg-pairwise, --amg-pairwise, --bottomk-pairwise, --fracminhash-pairwise.")
         sys.exit(1)
 
-    # Shared colour scale: 99th percentile across all methods, capped at 100 %
-    all_err  = np.concatenate(all_err_samples)
-    vmax_err = float(np.percentile(all_err, 99))
-    vmax_err = min(vmax_err, 1.0)
-    log.info("Shared vmax_err (99th percentile): %.4f", vmax_err)
+    # Shared colour scales: 99th percentile across all methods
+    all_abs  = np.concatenate(all_abs_samples)
+    vmax_abs = float(np.percentile(all_abs, 99))
+    log.info("Shared vmax_abs (99th percentile): %.4f", vmax_abs)
+
+    all_rel  = np.concatenate(all_rel_samples)
+    vmax_rel = float(np.percentile(all_rel, 99))
+    vmax_rel = min(vmax_rel, 1.0)   # cap at 100 % relative error
+    log.info("Shared vmax_rel (99th percentile): %.4f", vmax_rel)
 
     # ---- Render ---------------------------------------------------------------
     metric_label = {
@@ -633,33 +705,55 @@ def main():
         "containment_match_in_query": "Containment (m in q)",
     }[metric]
 
-    log.info("Rendering %d panel(s) at %d×%d pixels ...",
-             len(methods), args.canvas_size, args.canvas_size)
+    log.info("Rendering %d absolute-error panel(s) at %d×%d pixels ...",
+             len(abs_methods), args.canvas_size, args.canvas_size)
     plot_heatmaps_full(
-        kmc_keys      = kmc["keys"],
-        kmc_sim_vals  = kmc_vals,
-        rank          = rank,
-        methods       = methods,
-        N             = N,
-        canvas_size   = args.canvas_size,
-        vmax_err      = vmax_err,
-        metric_label  = metric_label,
+        kmc_keys       = kmc["keys"],
+        kmc_sim_vals   = kmc_vals,
+        rank           = rank,
+        methods        = abs_methods,
+        N              = N,
+        canvas_size    = args.canvas_size,
+        vmax_err       = vmax_abs,
+        metric_label   = metric_label,
         ordering_label = args.ordering,
-        out_dir       = out_dir,
+        out_dir        = out_dir,
         show_reference = args.show_reference,
+        error_type     = "absolute",
     )
 
-    # Write mean L1 to l1_errors.json (same file as 10_plot_heatmaps.py)
+    log.info("Rendering %d relative-error panel(s) at %d×%d pixels ...",
+             len(rel_methods), args.canvas_size, args.canvas_size)
+    plot_heatmaps_full(
+        kmc_keys       = kmc["keys"],
+        kmc_sim_vals   = kmc_vals,
+        rank           = rank,
+        methods        = rel_methods,
+        N              = N,
+        canvas_size    = args.canvas_size,
+        vmax_err       = vmax_rel,
+        metric_label   = metric_label,
+        ordering_label = args.ordering,
+        out_dir        = out_dir,
+        show_reference = args.show_reference,
+        error_type     = "relative",
+
+    )
+
+    # Write mean L1 (absolute and relative) to l1_errors.json
+    # Keys: "{metric}" = mean absolute error; "{metric}_relative" = mean relative error.
     l1_json_path = out_dir / "l1_errors.json"
     existing_l1  = {}
     if l1_json_path.exists():
         with open(l1_json_path) as f:
             existing_l1 = json.load(f)
     existing_l1[metric] = {
-        m["label"].split("\n")[0]: (
-            m["l1"] / (len(m["df"]) // 2) if len(m["df"]) > 0 else 0.0
-        )
-        for m in methods
+        m["label"].split("\n")[0]: m["mean_l1"]
+        for m in abs_methods
+    }
+    existing_l1[f"{metric}_relative"] = {
+        m["label"].split("\n")[0]: m["mean_rel_l1"]
+        for m in abs_methods
     }
     existing_l1[f"{metric}__l1_mode"] = "full"
     with open(l1_json_path, "w") as f:

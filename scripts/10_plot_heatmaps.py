@@ -384,6 +384,49 @@ def relative_error_matrix(estimate: np.ndarray, ground_truth: np.ndarray,
     return err
 
 
+def absolute_error_matrix(estimate: np.ndarray, ground_truth: np.ndarray,
+                           min_gt: float = 1e-6) -> np.ndarray:
+    """
+    Compute element-wise absolute error:
+        err[i,j] = |estimate - ground_truth|
+
+    Cells where ground_truth is NaN or below min_gt are set to NaN.
+    """
+    err = np.full_like(estimate, np.nan)
+    valid = (~np.isnan(ground_truth)) & (~np.isnan(estimate)) & (ground_truth > min_gt)
+    err[valid] = np.abs(estimate[valid] - ground_truth[valid])
+    return err
+
+
+def compute_full_relative_l1(
+    kmc_keys:   np.ndarray,
+    kmc_vals:   np.ndarray,
+    meth_keys:  np.ndarray,
+    meth_vals:  np.ndarray,
+    N:          int,
+    min_gt:     float = 1e-6,
+) -> tuple:
+    """
+    Compute total relative L1 error and pair count over all pairs present
+    in both KMC and method datasets.
+
+    Returns (rel_l1_total, n_valid_pairs) where
+        rel_l1_total = sum(|est - exact| / exact).
+    """
+    if meth_vals is None or len(meth_keys) == 0:
+        return 0.0, 0
+    pos      = np.searchsorted(kmc_keys, meth_keys)
+    in_range = pos < len(kmc_keys)
+    pos_safe = np.where(in_range, pos, 0)
+    matched  = in_range & (kmc_keys[pos_safe] == meth_keys)
+
+    m_vals = meth_vals[matched]
+    k_vals = kmc_vals[pos_safe[matched]]
+    valid  = (k_vals > min_gt) & np.isfinite(m_vals) & np.isfinite(k_vals)
+    rel_err = np.abs(m_vals[valid] - k_vals[valid]) / k_vals[valid]
+    return float(rel_err.sum()), int(valid.sum())
+
+
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
@@ -402,7 +445,8 @@ def plot_heatmaps(kmc_sim: np.ndarray,
                   leaf_order: np.ndarray,
                   metric_label: str,
                   out_dir: Path,
-                  show_reference: bool = False):
+                  show_reference: bool = False,
+                  error_type: str = "relative"):
     """
     Draw the error heatmap figure.
 
@@ -424,7 +468,8 @@ def plot_heatmaps(kmc_sim: np.ndarray,
     all_err = np.concatenate([m["err"][~np.isnan(m["err"])].ravel()
                                for m in methods])
     vmax_err = float(np.percentile(all_err, 99)) if len(all_err) else 1.0
-    vmax_err = min(vmax_err, 1.0)     # cap at 100 % relative error
+    if error_type == "relative":
+        vmax_err = min(vmax_err, 1.0)     # cap at 100 % relative error
     vmax_ref = float(np.nanmax(kmc_sim)) if not np.all(np.isnan(kmc_sim)) else 1.0
 
     missing_color = "#CCCCCC"   # light gray for pairs below similarity threshold
@@ -497,21 +542,31 @@ def plot_heatmaps(kmc_sim: np.ndarray,
         panel_idx += 1
 
     # --- Error panels (one per sketching method) ---
+    if error_type == "relative":
+        panel_title_suffix = f"|error| / KMC ({metric_label})"
+    else:
+        panel_title_suffix = f"|error| vs KMC ({metric_label})"
+
     for col, m in enumerate(methods, start=panel_idx):
         ax  = fig.add_subplot(gs[0, col])
         img = _draw_heatmap(
             ax, m["err"], cmap_err,
             vmin=0.0, vmax=vmax_err,
-            title=f"{m['label']}\n|error| / KMC ({metric_label})",
+            title=f"{m['label']}\n{panel_title_suffix}",
         )
 
     # Shared colorbar for all error panels (spans all error-panel columns)
     err_start = panel_idx
-    err_end   = n_panels - 1
     cax_err   = fig.add_subplot(gs[1, err_start:])
     cb_err    = fig.colorbar(img, cax=cax_err, orientation="horizontal")
-    cb_err.set_label(f"Relative error  |estimated − exact| / exact  (0 = blue, ≥{vmax_err:.0%} = red)",
-                     fontsize=8)
+    if error_type == "relative":
+        cb_err.set_label(
+            f"Relative error  |estimated − exact| / exact  (0 = blue, ≥{vmax_err:.0%} = red)",
+            fontsize=8)
+    else:
+        cb_err.set_label(
+            f"Absolute error  |estimated − exact|  (0 = blue, ≥{vmax_err:.4f} = red)",
+            fontsize=8)
     cb_err.ax.tick_params(labelsize=7)
     # Add a small legend patch for the missing color
     from matplotlib.patches import Patch
@@ -522,7 +577,8 @@ def plot_heatmaps(kmc_sim: np.ndarray,
         bbox_to_anchor=(1.0, -0.6), borderaxespad=0,
     )
 
-    stem = f"heatmap_{metric_label.lower().replace(' ', '_')}_relative_error"
+    metric_stem = metric_label.lower().replace(' ', '_')
+    stem = f"heatmap_{metric_stem}_{error_type}_error"
     for suffix in (".pdf", ".png"):
         fpath = out_dir / (stem + suffix)
         fig.savefig(fpath)
@@ -542,6 +598,9 @@ def parse_args():
     # --- method pairwise directories (all optional; include whichever have been run) ---
     p.add_argument("--amg-pairwise", default="",
                    help="AlphaMaxGeomHash pairwise directory "
+                        "(pairwise_results.npz + genome_index.json)")
+    p.add_argument("--mg-pairwise", default="",
+                   help="MaxGeomHash pairwise directory "
                         "(pairwise_results.npz + genome_index.json)")
     p.add_argument("--bottomk-pairwise", default="",
                    help="BottomK (kmer-sketch) pairwise directory "
@@ -624,9 +683,10 @@ def main():
             N,
         )
 
-    amg  = _load_npz_dir(args.amg_pairwise,          "AlphaMaxGeomHash")
-    bk   = _load_npz_dir(args.bottomk_pairwise,       "MinHash")
-    fmh_ks = _load_npz_dir(args.fracminhash_pairwise, "FracMinHash (kmer-sketch)")
+    amg    = _load_npz_dir(args.amg_pairwise,          "AlphaMaxGeomHash")
+    mg     = _load_npz_dir(args.mg_pairwise,           "MaxGeomHash")
+    bk     = _load_npz_dir(args.bottomk_pairwise,      "MinHash")
+    fmh_ks = _load_npz_dir(args.fracminhash_pairwise,  "FracMinHash (kmer-sketch)")
 
     # Sourmash FracMinHash CSV (optional; excluded by default)
     sourmash_csv = args.sourmash_csv or args.fracminhash  # backward-compat alias
@@ -661,6 +721,7 @@ def main():
     # ------------------------------------------------------------------
     method_specs = [
         (bk,     "MinHash\n(k=1000, kmer=31)"),
+        (mg,     "MaxGeomHash\n(W=64, b=90, k=31)"),
         (amg,    "AlphaMaxGeomHash\n(W=64, α=0.45, k=31)"),
         (fmh_ks, "FracMinHash\n(scale=0.01, k=31)"),
         (fmh_ss, "Sourmash FracMinHash\n(scaled=1000, k=31)"),
@@ -670,16 +731,23 @@ def main():
     _ii_tri, _jj_tri = np.tril_indices(M, k=-1)
     kmc_tri = kmc_sim[_ii_tri, _jj_tri]
 
-    methods = []
+    rel_methods = []   # for relative error heatmap
+    abs_methods = []   # for absolute error heatmap
     for dataset, label in method_specs:
         if dataset is None:
             continue
-        sim = build_submatrix(dataset["keys"], dataset[metric], selected, N)
-        err = relative_error_matrix(sim, kmc_sim)
+        sim     = build_submatrix(dataset["keys"], dataset[metric], selected, N)
+        rel_err = relative_error_matrix(sim, kmc_sim)
+        abs_err = absolute_error_matrix(sim, kmc_sim)
 
         if l1_mode == "full":
             # Full L1: all pairs present in both KMC and method NPZs
             l1_total, n_l1_pairs = compute_full_l1(
+                kmc["keys"], kmc[metric],
+                dataset["keys"], dataset[metric],
+                N,
+            )
+            rel_l1_total, n_rel_pairs = compute_full_relative_l1(
                 kmc["keys"], kmc[metric],
                 dataset["keys"], dataset[metric],
                 N,
@@ -690,22 +758,36 @@ def main():
             valid_l1 = (~np.isnan(kmc_tri)) & (~np.isnan(est_tri))
             l1_total = float(np.sum(np.abs(est_tri[valid_l1] - kmc_tri[valid_l1])))
             n_l1_pairs = int(valid_l1.sum())
+            kmc_tri_valid = kmc_tri[valid_l1]
+            est_tri_valid = est_tri[valid_l1]
+            rel_sub = np.abs(est_tri_valid - kmc_tri_valid) / np.where(
+                kmc_tri_valid > 1e-6, kmc_tri_valid, 1e-6)
+            rel_l1_total = float(rel_sub.sum())
+            n_rel_pairs  = int(valid_l1.sum())
 
-        mean_l1 = l1_total / n_l1_pairs if n_l1_pairs > 0 else 0.0
-        methods.append({"label": label, "err": err,
-                        "l1": l1_total, "n_l1_pairs": n_l1_pairs, "mean_l1": mean_l1})
+        mean_l1     = l1_total     / n_l1_pairs  if n_l1_pairs  > 0 else 0.0
+        mean_rel_l1 = rel_l1_total / n_rel_pairs if n_rel_pairs > 0 else 0.0
 
-        valid = err[~np.isnan(err)]
+        rel_methods.append({"label": label, "err": rel_err,
+                             "l1": l1_total, "n_l1_pairs": n_l1_pairs,
+                             "mean_l1": mean_l1, "mean_rel_l1": mean_rel_l1})
+        abs_methods.append({"label": label, "err": abs_err,
+                             "l1": l1_total, "n_l1_pairs": n_l1_pairs,
+                             "mean_l1": mean_l1, "mean_rel_l1": mean_rel_l1})
+
+        valid = rel_err[~np.isnan(rel_err)]
         if len(valid):
             log.info("  %s  relative error: median=%.4f  99pct=%.4f  max=%.4f  "
-                     "L1=%.4f  mean|err|=%.6f  n_pairs=%d",
+                     "MAE=%.6f  mean_rel=%.6f  n_pairs=%d",
                      label.split("\n")[0], np.median(valid),
                      np.percentile(valid, 99), valid.max(),
-                     l1_total, mean_l1, n_l1_pairs)
+                     mean_l1, mean_rel_l1, n_l1_pairs)
 
-    if not methods:
+    methods = rel_methods  # keep backward-compat alias for checks below
+
+    if not rel_methods:
         log.error("No method data loaded — provide at least one of "
-                  "--amg-pairwise, --bottomk-pairwise, --fracminhash-pairwise.")
+                  "--mg-pairwise, --amg-pairwise, --bottomk-pairwise, --fracminhash-pairwise.")
         sys.exit(1)
 
     # ------------------------------------------------------------------
@@ -725,27 +807,44 @@ def main():
         "containment_match_in_query": "Containment (m in q)",
     }[metric]
 
-    log.info("Generating heatmap figure (%s, %d panels) ...",
-             metric_label, len(methods))
+    log.info("Generating relative error heatmap figure (%s, %d panels) ...",
+             metric_label, len(rel_methods))
     plot_heatmaps(
         kmc_sim        = kmc_sim,
-        methods        = methods,
+        methods        = rel_methods,
         leaf_order     = leaf_order,
         metric_label   = metric_label,
         out_dir        = out_dir,
         show_reference = args.show_reference,
+        error_type     = "relative",
+    )
+
+    log.info("Generating absolute error heatmap figure (%s, %d panels) ...",
+             metric_label, len(abs_methods))
+    plot_heatmaps(
+        kmc_sim        = kmc_sim,
+        methods        = abs_methods,
+        leaf_order     = leaf_order,
+        metric_label   = metric_label,
+        out_dir        = out_dir,
+        show_reference = args.show_reference,
+        error_type     = "absolute",
     )
 
     # Save L1 errors so 10_plot_resources.py can build the accuracy bar chart.
     # We load+update rather than overwrite so that jaccard and max_containment
     # runs accumulate into the same file.
+    # Keys: "{metric}" = mean absolute error; "{metric}_relative" = mean relative error.
     l1_json_path = out_dir / "l1_errors.json"
     existing_l1 = {}
     if l1_json_path.exists():
         with open(l1_json_path) as f:
             existing_l1 = json.load(f)
     existing_l1[metric] = {
-        m["label"].split("\n")[0]: m["mean_l1"] for m in methods
+        m["label"].split("\n")[0]: m["mean_l1"] for m in rel_methods
+    }
+    existing_l1[f"{metric}_relative"] = {
+        m["label"].split("\n")[0]: m["mean_rel_l1"] for m in rel_methods
     }
     existing_l1[f"{metric}__l1_mode"] = l1_mode
     with open(l1_json_path, "w") as f:

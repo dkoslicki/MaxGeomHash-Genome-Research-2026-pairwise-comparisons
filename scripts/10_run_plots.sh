@@ -52,6 +52,7 @@ INCLUDE_SOURMASH="${INCLUDE_SOURMASH:-0}"  # 1 = add Sourmash FracMinHash
 CONDA_ENV="${CONDA_ENV:-sourmash}"         # conda env that has datashader
 
 KMC_PAIRWISE="${BASE}/data/GTDB/kmc_pairwise_thr0001"
+MG_PAIRWISE="${BASE}/data/GTDB/maxgeom_pairwise_thr0001"
 AMG_PAIRWISE="${BASE}/data/GTDB/alphamaxgeom_pairwise_thr0001"
 BK_PAIRWISE="${BASE}/data/GTDB/bottomk_pairwise_thr0001"
 FMH_KS_PAIRWISE="${BASE}/data/GTDB/fracminhash_pairwise_thr0001"
@@ -80,8 +81,9 @@ SOURMASH_FLAGS=""
 
 # Build method flags (only pass directories that exist)
 METHOD_FLAGS=""
-[[ -d "${AMG_PAIRWISE}" ]]    && METHOD_FLAGS+=" --amg-pairwise ${AMG_PAIRWISE}"
 [[ -d "${BK_PAIRWISE}" ]]     && METHOD_FLAGS+=" --bottomk-pairwise ${BK_PAIRWISE}"
+[[ -d "${MG_PAIRWISE}" ]]     && METHOD_FLAGS+=" --mg-pairwise ${MG_PAIRWISE}"
+[[ -d "${AMG_PAIRWISE}" ]]    && METHOD_FLAGS+=" --amg-pairwise ${AMG_PAIRWISE}"
 [[ -d "${FMH_KS_PAIRWISE}" ]] && METHOD_FLAGS+=" --fracminhash-pairwise ${FMH_KS_PAIRWISE}"
 
 # ---- Step 1: Full heatmaps via Datashader (all ~143k genomes) ----------------
