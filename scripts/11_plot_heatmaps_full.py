@@ -2,7 +2,7 @@
 """
 11_plot_heatmaps_full.py
 ========================
-Full-scale pairwise relative-error heatmaps for all 143,614 GTDB genomes,
+Full-scale pairwise absolute-error heatmaps for all 143,614 GTDB genomes,
 rendered with Datashader so that no dense M×M matrix is ever allocated.
 
 Every pair present in the KMC pairwise NPZ is used; nothing is subsampled.
@@ -273,7 +273,7 @@ def spectral_order(kmc_keys: np.ndarray, kmc_vals: np.ndarray, N: int) -> np.nda
 
 
 # ---------------------------------------------------------------------------
-# Relative-error computation → Datashader-ready DataFrame
+# Absolute-error computation → Datashader-ready DataFrame
 # ---------------------------------------------------------------------------
 
 def make_error_dataframe(
@@ -287,12 +287,12 @@ def make_error_dataframe(
 ) -> tuple:
     """
     Intersect the method's pairs with the KMC pairs, compute per-pair
-    relative error |estimate − exact| / exact, and return:
+    absolute error |estimate − exact|, and return:
 
       df    -- pandas DataFrame with columns (x, y, err), float32.
                Both triangles are included so the heatmap is symmetric.
-               (x, y) are genome plot ranks; err is the relative error.
-      l1    -- float: sum of relative errors over the matched pairs
+               (x, y) are genome plot ranks; err is the absolute error.
+      l1    -- float: sum of absolute errors over the matched pairs
                (each canonical pair counted once, not doubled).
 
     Datashader's Canvas.points() will aggregate these into a pixel grid
@@ -309,7 +309,7 @@ def make_error_dataframe(
     keys_m = meth_keys[matched]
 
     valid = (k_vals > min_gt) & np.isfinite(m_vals) & np.isfinite(k_vals)
-    err   = np.abs(m_vals[valid] - k_vals[valid]) / k_vals[valid]
+    err   = np.abs(m_vals[valid] - k_vals[valid])
     keys_v = keys_m[valid]
 
     l1   = float(err.sum())
@@ -461,7 +461,7 @@ def plot_heatmaps_full(
         ax = fig.add_subplot(gs[0, col_idx])
         ax.imshow(rgba, aspect="auto", interpolation="nearest")
         ax.set_title(
-            f"{m['label']}\n|error| / KMC ({metric_label})",
+            f"{m['label']}\n|error| vs KMC ({metric_label})",
             fontsize=10, pad=4,
         )
         ax.set_xticks([]); ax.set_yticks([])
@@ -475,8 +475,8 @@ def plot_heatmaps_full(
     cax_err = fig.add_subplot(gs[1, err_col_start:])
     cb_err  = fig.colorbar(sm_err, cax=cax_err, orientation="horizontal")
     cb_err.set_label(
-        f"Relative error  |estimated − exact| / exact"
-        f"  (0 = blue, ≥{vmax_err:.0%} = red)",
+        f"Absolute error  |estimated − exact|"
+        f"  (0 = blue, ≥{vmax_err:.4f} = red)",
         fontsize=8,
     )
     cb_err.ax.tick_params(labelsize=7)
@@ -490,7 +490,7 @@ def plot_heatmaps_full(
     )
 
     metric_stem = metric_label.lower().replace(" ", "_")
-    stem = f"heatmap_{metric_stem}_relative_error_full_{ordering_label}"
+    stem = f"heatmap_{metric_stem}_absolute_error_full_{ordering_label}"
     for suffix in (".pdf", ".png"):
         fpath = out_dir / (stem + suffix)
         fig.savefig(fpath)
@@ -585,8 +585,8 @@ def main():
         (_load_dir(args.fracminhash_pairwise,  "FracMinHash"),      "FracMinHash\n(scale=0.01, k=31)"),
     ]
 
-    # ---- Compute relative errors ----------------------------------------------
-    log.info("Computing relative errors ...")
+    # ---- Compute absolute errors ----------------------------------------------
+    log.info("Computing absolute errors ...")
     methods          = []
     all_err_samples  = []
 
