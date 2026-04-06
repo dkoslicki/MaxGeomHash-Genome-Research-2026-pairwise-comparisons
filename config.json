@@ -8,6 +8,11 @@
   "parallel_jobs": 384,
   "pairwise_cores": 384,
 
+  "maxgeom": {
+    "w": 64,
+    "b": 90
+  },
+
   "alphamaxgeom": {
     "w":     64,
     "alpha": 0.45

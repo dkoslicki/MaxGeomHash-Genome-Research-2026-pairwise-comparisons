@@ -5,6 +5,7 @@
 Compare sketching-method pairwise estimates against each other and against
 exact KMC values.  Supports all three kmer-sketch algorithms studied here:
 
+    MaxGeomHash       (--mg-pairwise)
     AlphaMaxGeomHash  (--amg-pairwise)
     BottomK           (--bottomk-pairwise)
     FracMinHash       (--fracminhash-pairwise)    <- kmer-sketch binary
@@ -38,6 +39,7 @@ This allows the full 2M-pair GTDB dataset to be processed in ~20 seconds.
 Usage:
   # Compare all three kmer-sketch methods against KMC (most common case):
   python3 09_sanity_check.py \\
+      --mg-pairwise           /scratch/.../maxgeom_pairwise \\    
       --amg-pairwise          /scratch/.../alphamaxgeom_pairwise \\
       --bottomk-pairwise      /scratch/.../bottomk_pairwise \\
       --fracminhash-pairwise  /scratch/.../fracminhash_pairwise \\
@@ -50,6 +52,7 @@ Usage:
 
   # Minimal: only AMG vs KMC (backwards-compatible with old pipeline):
   python3 09_sanity_check.py \\
+      --mg-pairwise   /scratch/.../maxgeom_pairwise \\  
       --amg-pairwise  /scratch/.../alphamaxgeom_pairwise \\
       --kmc-pairwise  /scratch/.../kmc_pairwise \\
       --output        /scratch/.../sanity_check
@@ -292,6 +295,9 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     # --- method pairwise directories ------------------------------------------
+    p.add_argument("--mg-pairwise", default="",
+                   help="MaxGeomHash pairwise directory "
+                        "(pairwise_results.npz + genome_index.json)")
     p.add_argument("--amg-pairwise", default="",
                    help="AlphaMaxGeomHash pairwise directory "
                         "(pairwise_results.npz + genome_index.json)")
@@ -333,11 +339,13 @@ def main():
         method_dirs["BK"] = Path(args.bottomk_pairwise)
     if args.fracminhash_pairwise and Path(args.fracminhash_pairwise).exists():
         method_dirs["FMH_ks"] = Path(args.fracminhash_pairwise)
+    if args.mg_pairwise and Path(args.mg_pairwise).exists():
+        method_dirs["MG"] = Path(args.mg_pairwise)
 
     if not method_dirs:
         log.error("No method pairwise directories provided / found. "
                   "Provide at least one of --amg-pairwise, --bottomk-pairwise, "
-                  "--fracminhash-pairwise.")
+                  "--fracminhash-pairwise, --mg-pairwise.")
         sys.exit(1)
 
     # ------------------------------------------------------------------
@@ -389,6 +397,7 @@ def main():
         "AMG":    "AlphaMaxGeomHash",
         "BK":     "BottomK",
         "FMH_ks": "FracMinHash (kmer-sketch)",
+        "MG":     "MaxGeomHash",
     }
 
     method_keys_list = list(method_data.keys())
