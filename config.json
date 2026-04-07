@@ -5,8 +5,8 @@
   "canonical":     true,
   "seed":          42,
 
-  "parallel_jobs": 700,
-  "pairwise_cores": 700,
+  "parallel_jobs": 200,
+  "pairwise_cores": 200,
 
   "maxgeom": {
     "w": 64,
